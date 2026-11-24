@@ -1,0 +1,42 @@
+wait 30
+dump 01_start
+type germ
+dump 02_typing
+touch 260 223
+wait 80
+type bra
+key 1
+wait 80
+type jap
+key 1
+wait 80
+type egyp
+key 1
+wait 80
+type ind
+key 1
+wait 90
+dump 03_after_guesses
+circle 150 0
+hold 0 1
+circle 150 0
+circle 150 0
+circle 150 0
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+hold 256 1
+dump 04_zoomed
+key 1024
+dump 05_list
+key 1024
+key 4
+key 4
+wait 90
+dump 06_gaveup

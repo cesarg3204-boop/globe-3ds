@@ -1,0 +1,7 @@
+build/
+*.elf
+*.smdh
+*.3dsx
+*.cia
+tools/sim/globe_sim
+tools/sim/.script.full
