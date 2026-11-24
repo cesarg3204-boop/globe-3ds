@@ -91,6 +91,14 @@ curl -LO https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/g
 python3 tools/gen_countries.py ne_50m_admin_0_countries.geojson source/countrydata.c
 ```
 
+## Icon
+
+`icon.png` (the Homebrew Launcher icon) is drawn from the same Natural Earth shapes:
+
+```sh
+python3 tools/make_icon.py ne_50m_admin_0_countries.geojson icon.png
+```
+
 ## Desktop preview
 
 `tools/sim` builds the game for your computer with a stand-in for the 3DS libraries, replays a
