@@ -1,5 +1,9 @@
 # Globe3DS
 
+<img src="cia/banner.png" width="512" alt="Globe3DS banner">
+
+**[Download the latest release](https://github.com/cesarg3204-boop/globe-3ds/releases/latest)** · [Install with FBI](#scan-with-fbi-installs-to-the-home-menu)
+
 Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the menu:
 
 - **Classic:** a country is hidden somewhere on the globe, and you find it by guessing. Every guess is
@@ -9,7 +13,7 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
 - **Explore:** a practice map. Browse a colourful political map of the world, see which country is under the
   crosshair, and type a country to fly to it and see its neighbours.
 
-![Playing](docs/screenshot-playing.png)
+<img src="docs/screenshot-menu.png" width="300" alt="Menu"> <img src="docs/screenshot-playing.png" width="300" alt="Classic">
 
 ## Classic
 
@@ -61,9 +65,24 @@ Your stats (games played, win rate, average guesses, streak) are saved per mode 
 
 ## Installing
 
-1. Download `Globe3DS.3dsx` (from a GitHub Actions build artifact, or build it yourself below).
+### Scan with FBI (installs to the HOME Menu)
+
+<img src="docs/fbi-qr.png" width="220" alt="QR code for the latest Globe3DS.cia">
+
+1. Open **FBI** on your 3DS and choose **Remote Install → Scan QR Code**.
+2. Point the camera at this QR code and confirm. FBI downloads and installs the latest `Globe3DS.cia`.
+3. Globe3DS appears on the HOME Menu with its own globe banner.
+
+The QR code points at
+`https://github.com/cesarg3204-boop/globe-3ds/releases/latest/download/Globe3DS.cia`.
+
+### Homebrew Launcher
+
+1. Download `Globe3DS.3dsx` from the [latest release](https://github.com/cesarg3204-boop/globe-3ds/releases/latest).
 2. Copy it to `sdmc:/3ds/` on your SD card.
 3. Open it from the Homebrew Launcher.
+
+Both versions work fully offline.
 
 ## Building
 
@@ -71,6 +90,16 @@ You need [devkitPro](https://devkitpro.org/wiki/Getting_Started) with the `3ds-d
 
 ```sh
 make
+```
+
+GitHub Actions builds both `Globe3DS.3dsx` and `Globe3DS.cia` on every push (see `.github/workflows/build.yml`),
+and pushing a `v*` tag publishes them as a release. To build the `.cia` locally you also need
+[makerom](https://github.com/3DSGuy/Project_CTR/releases) and [bannertool](https://github.com/Epicpkmn11/bannertool/releases):
+
+```sh
+bannertool makebanner -i cia/banner.png -a cia/audio.wav -o build/banner.bnr
+bannertool makesmdh -s "Globe3DS" -l "Globe3DS: country guessing games on a 3D globe" -p "cesarg3204-boop" -i icon.png -o build/icon.icn
+makerom -f cia -o Globe3DS.cia -elf Globe3DS.elf -rsf cia/globe3ds.rsf -icon build/icon.icn -banner build/banner.bnr -target t -exefslogo
 ```
 
 Or with Docker:
@@ -91,12 +120,14 @@ curl -LO https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/g
 python3 tools/gen_countries.py ne_50m_admin_0_countries.geojson source/countrydata.c
 ```
 
-## Icon
+## Icon and banner
 
-`icon.png` (the Homebrew Launcher icon) is drawn from the same Natural Earth shapes:
+`icon.png` (the menu icon) and `cia/banner.png` + `cia/audio.wav` (the HOME Menu banner and its chime) are
+drawn from the same Natural Earth shapes:
 
 ```sh
 python3 tools/make_icon.py ne_50m_admin_0_countries.geojson icon.png
+python3 tools/make_banner.py ne_50m_admin_0_countries.geojson cia/
 ```
 
 ## Desktop preview
