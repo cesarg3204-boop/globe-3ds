@@ -145,57 +145,75 @@ for i in range(N):
             D[i, j] = D[j, i] = 0
 np.fill_diagonal(D, 0)
 
-# ---------- render mesh ----------
+# ---------- render meshes ----------
+# Two levels of detail: a light one for the whole globe and a detailed one (with small islands) for close zoom.
+LODS = [(0.12, 0.03), (0.03, 0.001)]  # (simplify tolerance in degrees, smallest island area kept in sq. degrees)
+
 def parts(g):
     return list(g.geoms) if isinstance(g, MultiPolygon) else [g]
 
-verts, tris, cinfo = [], [], []
-for c in countries:
-    g = c["geom"]
-    simp = g.simplify(0.12, preserve_topology=True)
-    ps = [p for p in parts(simp) if not p.is_empty]
-    big = max(parts(g), key=lambda p: p.area)
-    keep = [p for p in ps if p.area > 0.03]
-    if not keep:
-        keep = [big.simplify(0.01, preserve_topology=True)]
-    vstart, tstart = len(verts), len(tris)
-    for poly in keep:
-        poly = orient(poly, 1.0)  # CCW exterior in lon/lat == CCW seen from outside the globe
-        poly = shapely.segmentize(poly, 4.0)
-        rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
-        flat = np.concatenate(rings)
-        ends = np.cumsum([len(r) for r in rings]).astype(np.uint32)
-        idx = earcut.triangulate_float64(flat, ends)
-        base = len(verts) - vstart
-        local = [(float(x), float(y)) for x, y in flat]
-        mids = {}
-        def mid(a, b):
-            k = (min(a, b), max(a, b))
-            if k not in mids:
-                (x0, y0), (x1, y1) = local[a], local[b]
-                local.append(((x0 + x1) / 2, (y0 + y1) / 2)); mids[k] = len(local) - 1
-            return mids[k]
-        def edge2(a, b):
+def triangulate(poly, verts, tris, vstart):
+    poly = orient(poly, 1.0)  # CCW exterior in lon/lat == CCW seen from outside the globe
+    poly = shapely.segmentize(poly, 4.0)
+    rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
+    flat = np.concatenate(rings)
+    ends = np.cumsum([len(r) for r in rings]).astype(np.uint32)
+    idx = earcut.triangulate_float64(flat, ends)
+    base = len(verts) - vstart
+    local = [(float(x), float(y)) for x, y in flat]
+    mids = {}
+    def mid(a, b):
+        k = (min(a, b), max(a, b))
+        if k not in mids:
             (x0, y0), (x1, y1) = local[a], local[b]
-            return ((x1 - x0) * math.cos(math.radians((y0 + y1) / 2))) ** 2 + (y1 - y0) ** 2
-        stack = [(int(idx[k]), int(idx[k + 1]), int(idx[k + 2])) for k in range(0, len(idx), 3)]
-        out = []
-        while stack:
-            a, b, c = stack.pop()
-            if max(edge2(a, b), edge2(b, c), edge2(c, a)) <= MAX_EDGE ** 2:
-                out.append((a, b, c)); continue
-            ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
-            stack += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
-        verts.extend(local)
-        for a, b, c in out:
-            tris.append((base + a, base + b, base + c))
-    vcount, tcount = len(verts) - vstart, len(tris) - tstart
-    assert vcount < 65535, (c['name'], vcount)
-    cen = g.representative_point() if g.area < 1 else max(parts(g), key=lambda p: p.area).centroid
+            local.append(((x0 + x1) / 2, (y0 + y1) / 2)); mids[k] = len(local) - 1
+        return mids[k]
+    def edge2(a, b):
+        (x0, y0), (x1, y1) = local[a], local[b]
+        return ((x1 - x0) * math.cos(math.radians((y0 + y1) / 2))) ** 2 + (y1 - y0) ** 2
+    stack = [(int(idx[k]), int(idx[k + 1]), int(idx[k + 2])) for k in range(0, len(idx), 3)]
+    while stack:
+        a, b, c = stack.pop()
+        if max(edge2(a, b), edge2(b, c), edge2(c, a)) <= MAX_EDGE ** 2:
+            tris.append((base + a, base + b, base + c)); continue
+        ab, bc, ca = mid(a, b), mid(b, c), mid(c, a)
+        stack += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+    verts.extend(local)
+
+def angle_deg(lat1, lon1, lat2, lon2):
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    d = math.sin(p1) * math.sin(p2) + math.cos(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.acos(max(-1.0, min(1.0, d))))
+
+meshes = []
+for tol, min_area in LODS:
+    verts, tris, info = [], [], []
+    for c in countries:
+        g = c["geom"]
+        ps = [p for p in parts(g.simplify(tol, preserve_topology=True)) if not p.is_empty]
+        big = max(parts(g), key=lambda p: p.area)
+        keep = [p for p in ps if p.area > min_area] or [big.simplify(0.005, preserve_topology=True)]
+        vstart, tstart = len(verts), len(tris)
+        for poly in keep:
+            triangulate(poly, verts, tris, vstart)
+        vcount, tcount = len(verts) - vstart, len(tris) - tstart
+        assert vcount < 65535, (c['name'], vcount)
+        info.append((vstart, vcount, tstart, tcount))
+    meshes.append((verts, tris, info))
+    print(f"LOD tol={tol}: vertices {len(verts)} triangles {len(tris)}", file=sys.stderr)
+
+cinfo = []
+for i, c in enumerate(countries):
+    g = c["geom"]
+    big = max(parts(g), key=lambda p: p.area)
+    cen = g.representative_point() if g.area < 1 else big.centroid
     minx, miny, maxx, maxy = big.bounds
     extent = max(maxx - minx, maxy - miny)
-    cinfo.append((vstart, vcount, tstart, tcount, cen.y, cen.x, extent))
-print("vertices", len(verts), "triangles", len(tris), file=sys.stderr)
+    # radius of a cap around the label point that holds every vertex, so off-screen countries can be skipped
+    fv, _, finfo = meshes[1]
+    vs, vc = finfo[i][0], finfo[i][1]
+    cap = max(angle_deg(cen.y, cen.x, y, x) for x, y in fv[vs:vs + vc])
+    cinfo.append((cen.y, cen.x, extent, cap))
 
 def cstr(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -204,21 +222,26 @@ with open(OUT, "w") as o:
     o.write("// Generated by tools/gen_countries.py from Natural Earth 1:50m (public domain). Do not edit.\n")
     o.write('#include "countrydata.h"\n\n')
     o.write(f"const int COUNTRY_COUNT = {N};\n")
-    o.write(f"const int VERTEX_COUNT = {len(verts)};\n")
-    o.write(f"const int TRIANGLE_COUNT = {len(tris)};\n\n")
+    o.write(f"const int VERTEX_COUNT[LOD_COUNT] = {{{len(meshes[0][0])}, {len(meshes[1][0])}}};\n")
+    o.write(f"const int TRIANGLE_COUNT[LOD_COUNT] = {{{len(meshes[0][1])}, {len(meshes[1][1])}}};\n\n")
     o.write("const Country COUNTRIES[] = {\n")
-    for c, (vs, vc, ts, tc, la, lo, ex) in zip(countries, cinfo):
-        o.write(f"  {{{cstr(c['name'])}, {cstr('|'.join(c['keys']))}, {la:.3f}f, {lo:.3f}f, {ex:.2f}f, "
-                f"{vs}, {vc}, {ts}, {tc}, {c['shade']}, {int(c['target'])}}},\n")
+    for i, (c, (la, lo, ex, cap)) in enumerate(zip(countries, cinfo)):
+        l0, l1 = meshes[0][2][i], meshes[1][2][i]
+        o.write(f"  {{{cstr(c['name'])}, {cstr('|'.join(c['keys']))}, {la:.3f}f, {lo:.3f}f, {ex:.2f}f, {cap:.2f}f, "
+                f"{{{l0[0]}, {l1[0]}}}, {{{l0[1]}, {l1[1]}}}, {{{l0[2]}, {l1[2]}}}, {{{l0[3]}, {l1[3]}}}, "
+                f"{c['shade']}, {int(c['target'])}}},\n")
     o.write("};\n\n")
-    o.write("const short VERTS[] = {\n")
-    for k in range(0, len(verts), 8):
-        o.write("  " + ",".join(f"{int(round(x*100))},{int(round(y*100))}" for x, y in verts[k:k+8]) + ",\n")
-    o.write("};\n\n")
-    o.write("const unsigned short TRIS[] = {\n")
-    for k in range(0, len(tris), 10):
-        o.write("  " + ",".join(f"{a},{b},{c}" for a, b, c in tris[k:k+10]) + ",\n")
-    o.write("};\n\n")
+    for lod, (verts, tris, _) in enumerate(meshes):
+        o.write(f"static const short VERTS{lod}[] = {{\n")
+        for k in range(0, len(verts), 8):
+            o.write("  " + ",".join(f"{int(round(x*100))},{int(round(y*100))}" for x, y in verts[k:k+8]) + ",\n")
+        o.write("};\n\n")
+        o.write(f"static const unsigned short TRIS{lod}[] = {{\n")
+        for k in range(0, len(tris), 10):
+            o.write("  " + ",".join(f"{a},{b},{c}" for a, b, c in tris[k:k+10]) + ",\n")
+        o.write("};\n\n")
+    o.write("const short* const VERTS[LOD_COUNT] = { VERTS0, VERTS1 };\n")
+    o.write("const unsigned short* const TRIS[LOD_COUNT] = { TRIS0, TRIS1 };\n\n")
     o.write("const unsigned short DIST_KM[] = {\n")
     for i in range(N):
         o.write("  " + ",".join(str(int(round(min(d, 65000)))) for d in D[i]) + ",\n")

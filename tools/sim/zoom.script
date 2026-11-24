@@ -1,0 +1,55 @@
+wait 10
+touch 160 182
+wait 30
+type vatic
+key 1
+wait 90
+dump 50_vatican
+type tuva
+key 1
+wait 90
+dump 51_tuvalu
+type barbad
+key 1
+wait 90
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+hold 512 1
+dump 52_caribbean

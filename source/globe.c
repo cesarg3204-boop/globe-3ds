@@ -6,21 +6,37 @@
 #include <stdlib.h>
 
 #define DEG (3.14159265f / 180.0f)
+#define SCREEN_W 400.0f
+#define SCREEN_H 240.0f
 
-static float* vCosLat; static float* vSinLat; static float* vCosLon; static float* vSinLon;
+// per-LOD vertex trig, precomputed once
+static float* vCosLat[LOD_COUNT]; static float* vSinLat[LOD_COUNT];
+static float* vCosLon[LOD_COUNT]; static float* vSinLon[LOD_COUNT];
+// projected vertices of the country being drawn
 static float* sx; static float* sy; static float* sz; static float* sl;
+static float capCos[512];  // cos of each country's bounding cap radius (with a margin)
 
 void globe_init(void)
 {
-	int n = VERTEX_COUNT;
-	vCosLat = malloc(sizeof(float) * n * 8);
-	vSinLat = vCosLat + n; vCosLon = vSinLat + n; vSinLon = vCosLon + n;
-	sx = vSinLon + n; sy = sx + n; sz = sy + n; sl = sz + n;
-	for (int i = 0; i < n; i++) {
-		float lon = VERTS[i * 2] * 0.01f * DEG, lat = VERTS[i * 2 + 1] * 0.01f * DEG;
-		vCosLat[i] = cosf(lat); vSinLat[i] = sinf(lat);
-		vCosLon[i] = cosf(lon); vSinLon[i] = sinf(lon);
+	int maxCount = 0;
+	for (int lod = 0; lod < LOD_COUNT; lod++) {
+		int n = VERTEX_COUNT[lod];
+		vCosLat[lod] = malloc(sizeof(float) * n * 4);
+		vSinLat[lod] = vCosLat[lod] + n; vCosLon[lod] = vSinLat[lod] + n; vSinLon[lod] = vCosLon[lod] + n;
+		for (int i = 0; i < n; i++) {
+			float lon = VERTS[lod][i * 2] * 0.01f * DEG, lat = VERTS[lod][i * 2 + 1] * 0.01f * DEG;
+			vCosLat[lod][i] = cosf(lat); vSinLat[lod][i] = sinf(lat);
+			vCosLon[lod][i] = cosf(lon); vSinLon[lod][i] = sinf(lon);
+		}
 	}
+	for (int c = 0; c < COUNTRY_COUNT; c++) {
+		for (int lod = 0; lod < LOD_COUNT; lod++)
+			if (COUNTRIES[c].vcount[lod] > maxCount) maxCount = COUNTRIES[c].vcount[lod];
+		float cap = COUNTRIES[c].cap + 0.5f;
+		capCos[c] = cap >= 180.0f ? -1.0f : cosf(cap * DEG);
+	}
+	sx = malloc(sizeof(float) * maxCount * 4);
+	sy = sx + maxCount; sz = sy + maxCount; sl = sz + maxCount;
 }
 
 static float wrap180(float a)
@@ -42,7 +58,7 @@ void globe_view_update(GlobeView* v)
 	if (v->animating) {
 		float dlon = wrap180(v->tlon - v->lon), dlat = v->tlat - v->lat;
 		v->lon += dlon * 0.1f; v->lat += dlat * 0.1f;
-		if (fabsf(dlon) < 0.05f && fabsf(dlat) < 0.05f) v->animating = false;
+		if (fabsf(dlon) < 0.01f && fabsf(dlat) < 0.01f) v->animating = false;
 	}
 	v->lon = wrap180(v->lon);
 	if (v->lat > 89) v->lat = 89;
@@ -59,36 +75,59 @@ static inline u32 shade(u32 c, float f)
 // light direction in view space (east, north, towards viewer), normalised
 static const float LX = -0.36f, LY = 0.46f, LZ = 0.81f;
 
-static void project(const GlobeView* v, float cx, float cy)
+typedef struct { float cl0, sl0, cp0, sp0, R, cx, cy; } Projection;
+
+static Projection make_projection(const GlobeView* v, float cx, float cy)
 {
-	float R = GLOBE_RADIUS * v->zoom;
-	float cl0 = cosf(v->lon * DEG), sl0 = sinf(v->lon * DEG);
-	float cp0 = cosf(v->lat * DEG), sp0 = sinf(v->lat * DEG);
-	for (int i = 0; i < VERTEX_COUNT; i++) {
-		float cosdl = vCosLon[i] * cl0 + vSinLon[i] * sl0;  // cos(lon - lon0)
-		float sindl = vSinLon[i] * cl0 - vCosLon[i] * sl0;  // sin(lon - lon0)
-		float e = vCosLat[i] * sindl;
-		float nn = cp0 * vSinLat[i] - sp0 * vCosLat[i] * cosdl;
-		float d = sp0 * vSinLat[i] + cp0 * vCosLat[i] * cosdl;
-		sx[i] = cx + R * e;
-		sy[i] = cy - R * nn;
-		sz[i] = d;
-		float lum = e * LX + nn * LY + d * LZ;
-		sl[i] = 0.42f + 0.68f * (lum > 0 ? lum : 0);
-	}
+	Projection p = { cosf(v->lon * DEG), sinf(v->lon * DEG), cosf(v->lat * DEG), sinf(v->lat * DEG),
+	                 GLOBE_RADIUS * v->zoom, cx, cy };
+	return p;
+}
+
+// cosine of the angle between the view centre and a point
+static float view_cos(const Projection* p, float lat, float lon)
+{
+	float la = lat * DEG, lo = lon * DEG;
+	return p->sp0 * sinf(la) + p->cp0 * cosf(la) * (cosf(lo) * p->cl0 + sinf(lo) * p->sl0);
 }
 
 void globe_draw(const GlobeView* v, const u32* countryColor, float cx, float cy)
 {
-	project(v, cx, cy);
+	Projection p = make_projection(v, cx, cy);
+	int lod = v->zoom >= 2.5f ? 1 : 0;
+	// angular radius of the part of the globe that can be on screen
+	float halfDiag = sqrtf(SCREEN_W * SCREEN_W + SCREEN_H * SCREEN_H) / 2.0f / p.R;
+	float viewAngle = halfDiag >= 1.0f ? 90.0f : asinf(halfDiag) / DEG;
+
 	for (int c = 0; c < COUNTRY_COUNT; c++) {
 		const Country* k = &COUNTRIES[c];
-		const unsigned short* t = &TRIS[k->tstart * 3];
-		int vb = k->vstart;
+		// skip countries that are entirely outside the visible cap
+		float total = viewAngle + k->cap + 0.5f;
+		if (total < 180.0f && view_cos(&p, k->lat, k->lon) < cosf(total * DEG)) continue;
+
+		int vb = k->vstart[lod], n = k->vcount[lod];
+		const float *cla = vCosLat[lod] + vb, *sla = vSinLat[lod] + vb, *clo = vCosLon[lod] + vb, *slo = vSinLon[lod] + vb;
+		for (int i = 0; i < n; i++) {
+			float cosdl = clo[i] * p.cl0 + slo[i] * p.sl0;  // cos(lon - lon0)
+			float sindl = slo[i] * p.cl0 - clo[i] * p.sl0;  // sin(lon - lon0)
+			float e = cla[i] * sindl;
+			float nn = p.cp0 * sla[i] - p.sp0 * cla[i] * cosdl;
+			float d = p.sp0 * sla[i] + p.cp0 * cla[i] * cosdl;
+			sx[i] = cx + p.R * e;
+			sy[i] = cy - p.R * nn;
+			sz[i] = d;
+			float lum = e * LX + nn * LY + d * LZ;
+			sl[i] = 0.42f + 0.68f * (lum > 0 ? lum : 0);
+		}
+
+		const unsigned short* t = &TRIS[lod][k->tstart[lod] * 3];
 		u32 col = countryColor[c];
-		for (int i = 0; i < k->tcount; i++, t += 3) {
-			int a = vb + t[0], b = vb + t[1], d = vb + t[2];
+		for (int i = 0; i < k->tcount[lod]; i++, t += 3) {
+			int a = t[0], b = t[1], d = t[2];
 			if (sz[a] < -0.05f && sz[b] < -0.05f && sz[d] < -0.05f) continue;
+			// off screen?
+			if ((sx[a] < 0 && sx[b] < 0 && sx[d] < 0) || (sx[a] > SCREEN_W && sx[b] > SCREEN_W && sx[d] > SCREEN_W)) continue;
+			if ((sy[a] < 0 && sy[b] < 0 && sy[d] < 0) || (sy[a] > SCREEN_H && sy[b] > SCREEN_H && sy[d] > SCREEN_H)) continue;
 			// CCW (east/north) triangles face the viewer; screen y is flipped so front faces have negative area
 			float area = (sx[b] - sx[a]) * (sy[d] - sy[a]) - (sy[b] - sy[a]) * (sx[d] - sx[a]);
 			if (area > 0.0f) continue;
@@ -101,18 +140,17 @@ void globe_draw(const GlobeView* v, const u32* countryColor, float cx, float cy)
 void globe_draw_markers(const GlobeView* v, const u32* countryColor, const unsigned char* markerMask,
                         int highlight, float t, float cx, float cy)
 {
-	float R = GLOBE_RADIUS * v->zoom;
-	float cl0 = cosf(v->lon * DEG), sl0 = sinf(v->lon * DEG);
-	float cp0 = cosf(v->lat * DEG), sp0 = sinf(v->lat * DEG);
+	Projection p = make_projection(v, cx, cy);
 	for (int c = 0; c < COUNTRY_COUNT; c++) {
 		if (!markerMask[c] && c != highlight) continue;
 		const Country* k = &COUNTRIES[c];
 		float lat = k->lat * DEG, lon = k->lon * DEG;
-		float cosdl = cosf(lon) * cl0 + sinf(lon) * sl0, sindl = sinf(lon) * cl0 - cosf(lon) * sl0;
-		float d = sp0 * sinf(lat) + cp0 * cosf(lat) * cosdl;
+		float cosdl = cosf(lon) * p.cl0 + sinf(lon) * p.sl0, sindl = sinf(lon) * p.cl0 - cosf(lon) * p.sl0;
+		float d = p.sp0 * sinf(lat) + p.cp0 * cosf(lat) * cosdl;
 		if (d < 0.05f) continue;
-		float x = cx + R * cosf(lat) * sindl;
-		float y = cy - R * (cp0 * sinf(lat) - sp0 * cosf(lat) * cosdl);
+		float x = cx + p.R * cosf(lat) * sindl;
+		float y = cy - p.R * (p.cp0 * sinf(lat) - p.sp0 * cosf(lat) * cosdl);
+		if (x < -20 || x > SCREEN_W + 20 || y < -20 || y > SCREEN_H + 20) continue;
 		bool small = k->extent * v->zoom < 3.0f;
 		if (c == highlight) {
 			float pulse = 0.5f + 0.5f * sinf(t * 6.0f);
@@ -130,15 +168,19 @@ void globe_draw_markers(const GlobeView* v, const u32* countryColor, const unsig
 	}
 }
 
-// Which country covers this point? Returns -1 for ocean. Tests the same triangles that are drawn.
+// Which country covers this point? Returns -1 for ocean. Uses the detailed mesh.
 int globe_country_at(float lat, float lon)
 {
 	float px = lon * 100.0f, py = lat * 100.0f;
 	for (int c = 0; c < COUNTRY_COUNT; c++) {
 		const Country* k = &COUNTRIES[c];
-		const unsigned short* t = &TRIS[k->tstart * 3];
-		const short* v = &VERTS[k->vstart * 2];
-		for (int i = 0; i < k->tcount; i++, t += 3) {
+		// cheap reject using the country's bounding cap
+		float la = lat * DEG, lo = lon * DEG, kla = k->lat * DEG, klo = k->lon * DEG;
+		float cosang = sinf(la) * sinf(kla) + cosf(la) * cosf(kla) * cosf(lo - klo);
+		if (cosang < capCos[c]) continue;
+		const unsigned short* t = &TRIS[1][k->tstart[1] * 3];
+		const short* v = &VERTS[1][k->vstart[1] * 2];
+		for (int i = 0; i < k->tcount[1]; i++, t += 3) {
 			float ax = v[t[0] * 2], ay = v[t[0] * 2 + 1], bx = v[t[1] * 2], by = v[t[1] * 2 + 1];
 			float cx = v[t[2] * 2], cy = v[t[2] * 2 + 1];
 			if ((px < ax && px < bx && px < cx) || (px > ax && px > bx && px > cx)) continue;

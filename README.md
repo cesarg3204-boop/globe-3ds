@@ -53,7 +53,7 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
 | D-Pad up/down | Move through suggestions or scroll the guess list |
 | X | Show or hide your guesses, sorted closest first |
 | Circle Pad | Spin the globe |
-| L / R | Zoom out / in |
+| L / R | Zoom out / in (up to 40x, with extra detail and small islands when zoomed in) |
 | SELECT twice | Give up and reveal the answer |
 | START | Back to the menu (quit from the menu) |
 

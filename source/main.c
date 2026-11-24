@@ -13,6 +13,7 @@
 #include "game.h"
 #include "globe.h"
 
+#define MAX_ZOOM 40.0f
 #define TOP_W 400
 #define BOT_W 320
 #define SCR_H 240
@@ -306,8 +307,8 @@ static void explore_select(int c)
 	if (c >= 0) {
 		globe_focus(&view, COUNTRIES[c].lat, COUNTRIES[c].lon);
 		// zoom in on small countries, out for big ones
-		float z = 50.0f / (COUNTRIES[c].extent + 4.0f);
-		view.zoom = z < 1.0f ? 1.0f : (z > 6.0f ? 6.0f : z);
+		float z = 45.0f / (COUNTRIES[c].extent + 1.0f);
+		view.zoom = z < 1.0f ? 1.0f : (z > MAX_ZOOM ? MAX_ZOOM : z);
 	}
 }
 
@@ -463,7 +464,7 @@ static void draw_top_bridge(float cx)
 static void draw_top_explore(float cx, float cy)
 {
 	text(8, 4, 0.55f, CLR_ACCENT, 0, "EXPLORE");
-	text(TOP_W - 8, 4, 0.42f, CLR_DIM, C2D_AlignRight, "Zoom %.1fx", view.zoom);
+	text(TOP_W - 8, 4, 0.42f, CLR_DIM, C2D_AlignRight, view.zoom < 10 ? "Zoom %.1fx" : "Zoom %.0fx", view.zoom);
 	// crosshair
 	u32 ch = RGBA(255, 255, 255, 220);
 	C2D_DrawRectSolid(cx - 9, cy - 0.75f, 0.9f, 6, 1.5f, ch);
@@ -809,7 +810,7 @@ int main(int argc, char* argv[])
 {
 	gfxInitDefault();
 	C3D_Init(C3D_DEFAULT_CMDBUF_SIZE * 4);
-	C2D_Init(16384);
+	C2D_Init(24576);
 	C2D_Prepare();
 	C3D_RenderTarget* top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
 	C3D_RenderTarget* bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
@@ -886,10 +887,10 @@ int main(int argc, char* argv[])
 			view.animating = false;
 			moved = true;
 		}
-		if (kHeld & KEY_R) { view.zoom *= 1.03f; moved = true; }
-		if (kHeld & KEY_L) { view.zoom /= 1.03f; moved = true; }
+		if (kHeld & KEY_R) { view.zoom *= 1.04f; moved = true; }
+		if (kHeld & KEY_L) { view.zoom /= 1.04f; moved = true; }
 		if (view.zoom < 1.0f) view.zoom = 1.0f;
-		if (view.zoom > 8.0f) view.zoom = 8.0f;
+		if (view.zoom > MAX_ZOOM) view.zoom = MAX_ZOOM;
 		idleTimer = (moved || kDown) ? 0 : idleTimer + 1;
 		bool spin = inMenu || (game.mode == MODE_CLASSIC && game.guessCount == 0);
 		if (spin && !view.animating && idleTimer > 120) view.lon += 0.12f;
