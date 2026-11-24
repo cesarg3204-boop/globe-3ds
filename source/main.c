@@ -1,4 +1,5 @@
-// Globe3DS - guess the hidden country; every guess tells you how far away it is.
+// Globe3DS - country guessing games on a 3DS globe.
+// Classic: find the hidden country by distance. Bridge: connect two countries through their neighbours.
 #include <3ds.h>
 #include <citro2d.h>
 #include <stdio.h>
@@ -19,7 +20,8 @@
 // ---------------------------------------------------------------- palette
 #define RGBA(r, g, b, a) C2D_Color32(r, g, b, a)
 static u32 CLR_SPACE, CLR_OCEAN_A, CLR_OCEAN_B, CLR_GLOW, CLR_BG, CLR_PANEL, CLR_KEY, CLR_KEY_DOWN,
-	CLR_TEXT, CLR_DIM, CLR_ACCENT, CLR_FOUND, CLR_WHITE;
+	CLR_TEXT, CLR_DIM, CLR_ACCENT, CLR_FOUND, CLR_WHITE, CLR_START, CLR_END, CLR_ON, CLR_NEAR, CLR_OFF,
+	CLR_REVEAL;
 static u32 LAND[8];
 
 static void palette_init(void)
@@ -37,6 +39,12 @@ static void palette_init(void)
 	CLR_ACCENT = RGBA(255, 138, 61, 255);
 	CLR_FOUND = RGBA(54, 212, 107, 255);
 	CLR_WHITE = RGBA(255, 255, 255, 255);
+	CLR_START = RGBA(80, 190, 255, 255);
+	CLR_END = RGBA(240, 90, 200, 255);
+	CLR_ON = RGBA(54, 212, 107, 255);
+	CLR_NEAR = RGBA(245, 200, 60, 255);
+	CLR_OFF = RGBA(205, 80, 72, 255);
+	CLR_REVEAL = RGBA(230, 232, 240, 255);
 	// muted land tones for countries not guessed yet
 	LAND[0] = RGBA(120, 126, 112, 255);
 	LAND[1] = RGBA(126, 132, 116, 255);
@@ -90,6 +98,14 @@ static float text_width(float scale, const char* s)
 	return w;
 }
 
+// draws text shrunk (down to 60%) so it fits in maxW pixels
+static void text_fit(float x, float y, float scale, float maxW, u32 color, u32 flags, const char* s)
+{
+	float w = text_width(scale, s);
+	if (w > maxW) scale = scale * maxW / w > scale * 0.6f ? scale * maxW / w : scale * 0.6f;
+	text(x, y, scale, color, flags, "%s", s);
+}
+
 static void fmt_km(char* out, int km)
 {
 	if (km >= 1000) sprintf(out, "%d,%03d km", km / 1000, km % 1000);
@@ -101,6 +117,13 @@ typedef enum { VIEW_KEYBOARD, VIEW_LIST } BottomView;
 
 static Game game;
 static Stats stats;
+static bool inMenu = true;
+static int menuSel = 0;
+static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge" };
+static const char* MODE_DESC[MODE_COUNT] = {
+	"Find the hidden country by how far each guess is.",
+	"Link two countries through bordering countries.",
+};
 static GlobeView view;
 static BottomView bottomView = VIEW_KEYBOARD;
 static u32 countryColor[512];
@@ -146,6 +169,21 @@ static void refresh_colors(void)
 		countryColor[i] = LAND[COUNTRIES[i].shade & 7];
 		markerMask[i] = 0;
 	}
+	if (inMenu) return;
+	if (game.mode == MODE_BRIDGE) {
+		static const u32* routeColor[3] = { &CLR_ON, &CLR_NEAR, &CLR_OFF };
+		if (game.gaveUp)
+			for (int i = 0; i < game.chainLen; i++) { countryColor[game.chain[i]] = CLR_REVEAL; markerMask[game.chain[i]] = 1; }
+		for (int i = 0; i < game.guessCount; i++) {
+			int c = game.guesses[i];
+			countryColor[c] = *routeColor[bridge_route_status(&game, c)];
+			markerMask[c] = 1;
+		}
+		countryColor[game.start] = CLR_START;
+		countryColor[game.end] = CLR_END;
+		markerMask[game.start] = markerMask[game.end] = 1;
+		return;
+	}
 	for (int i = 0; i < game.guessCount; i++) {
 		int c = game.guesses[i];
 		countryColor[c] = c == game.target ? CLR_FOUND : heat_color(country_distance(c, game.target));
@@ -157,13 +195,52 @@ static void refresh_colors(void)
 	}
 }
 
-static void new_game(void)
+static void focus_between(int a, int b)
 {
-	game_new(&game);
+	const float D = 3.14159265f / 180.0f;
+	float x = 0, y = 0, z = 0;
+	int ends[2] = { a, b };
+	for (int i = 0; i < 2; i++) {
+		float la = COUNTRIES[ends[i]].lat * D, lo = COUNTRIES[ends[i]].lon * D;
+		x += cosf(la) * cosf(lo); y += cosf(la) * sinf(lo); z += sinf(la);
+	}
+	globe_focus(&view, atan2f(z, sqrtf(x * x + y * y)) / D, atan2f(y, x) / D);
+}
+
+// zoom so that both ends of a bridge fit on the top screen
+static void zoom_to_fit(int a, int b)
+{
+	const float D = 3.14159265f / 180.0f;
+	float la1 = COUNTRIES[a].lat * D, lo1 = COUNTRIES[a].lon * D, la2 = COUNTRIES[b].lat * D, lo2 = COUNTRIES[b].lon * D;
+	float dot = sinf(la1) * sinf(la2) + cosf(la1) * cosf(la2) * cosf(lo1 - lo2);
+	float half = acosf(dot > 1 ? 1 : (dot < -1 ? -1 : dot)) / 2;
+	half += (COUNTRIES[a].extent + COUNTRIES[b].extent) * 0.25f * D;  // leave room for the countries themselves
+	float z = half > 0.01f ? 68.0f / (GLOBE_RADIUS * sinf(half < 1.5f ? half : 1.5f)) : 4.0f;
+	view.zoom = z < 1.0f ? 1.0f : (z > 4.0f ? 4.0f : z);
+}
+
+static void new_game(GameMode mode)
+{
+	inMenu = false;
+	game_new(&game, mode);
+	stats_load(&stats, mode);
 	bottomView = VIEW_KEYBOARD;
 	listScroll = 0;
 	confirmGiveUp = false;
 	view.animating = false;
+	if (mode == MODE_BRIDGE) {
+		focus_between(game.start, game.end);
+		view.lat = view.tlat; view.lon = view.tlon; view.animating = false;  // jump straight there
+		zoom_to_fit(game.start, game.end);
+	}
+	refresh_colors();
+}
+
+static void open_menu(void)
+{
+	inMenu = true;
+	bottomView = VIEW_KEYBOARD;
+	confirmGiveUp = false;
 	refresh_colors();
 }
 
@@ -179,7 +256,7 @@ static void finish_game(bool won)
 	} else {
 		stats.streak = 0;
 	}
-	stats_save(&stats);
+	stats_save(&stats, game.mode);
 }
 
 static void submit_guess(int c)
@@ -190,11 +267,14 @@ static void submit_guess(int c)
 	}
 	GuessResult r = game_guess(&game, c);
 	if (r == RESULT_REPEAT) { show_toast("Already guessed"); return; }
+	if (r == RESULT_ENDPOINT) { show_toast("That's one end of the bridge"); return; }
 	if (r == RESULT_NONE) return;
 	refresh_colors();
 	globe_focus(&view, COUNTRIES[c].lat, COUNTRIES[c].lon);
 	confirmGiveUp = false;
 	if (r == RESULT_WIN) finish_game(true);
+	if (r == RESULT_LOSE) finish_game(false);
+	if (game.mode == MODE_BRIDGE && (r == RESULT_WIN || r == RESULT_LOSE)) focus_between(game.start, game.end);
 }
 
 static void type_char(char ch)
@@ -210,17 +290,36 @@ static void type_char(char ch)
 	game_update_suggestions(&game);
 }
 
-// sorted copy of guesses, closest first
+// sorting key for the guess list: classic = distance, bridge = route status (stable)
+static int guess_rank(int c)
+{
+	return game.mode == MODE_BRIDGE ? (int)bridge_route_status(&game, c) : country_distance(c, game.target);
+}
+
+// sorted copy of guesses, best first
 static int sorted_guesses(int* out)
 {
 	int n = game.guessCount;
 	for (int i = 0; i < n; i++) out[i] = game.guesses[i];
 	for (int i = 1; i < n; i++) {
-		int v = out[i], dv = country_distance(v, game.target), j = i - 1;
-		while (j >= 0 && country_distance(out[j], game.target) > dv) { out[j + 1] = out[j]; j--; }
+		int v = out[i], dv = guess_rank(v), j = i - 1;
+		while (j >= 0 && guess_rank(out[j]) > dv) { out[j + 1] = out[j]; j--; }
 		out[j + 1] = v;
 	}
 	return n;
+}
+
+static const char* route_label(RouteStatus r)
+{
+	return r == ROUTE_ON ? "On a shortest route" : (r == ROUTE_NEAR ? "Close to a route" : "Off route");
+}
+
+static void chain_text(char* out, int size)
+{
+	int len = 0;
+	out[0] = 0;
+	for (int i = 0; i < game.chainLen && len < size - 1; i++)
+		len += snprintf(out + len, size - len, "%s%s", i ? " > " : "", COUNTRIES[game.chain[i]].name);
 }
 
 static bool in_rect(touchPosition t, float x, float y, float w, float h)
@@ -231,6 +330,61 @@ static bool in_rect(touchPosition t, float x, float y, float w, float h)
 // ---------------------------------------------------------------- top screen
 static float starX[90], starY[90];
 static u8 starA[90];
+
+static void draw_toast(float cx)
+{
+	if (toastTimer <= 0) return;
+	float w = text_width(0.5f, toast) + 20;
+	C2D_DrawRectSolid(cx - w / 2, 24, 0.95f, w, 22, RGBA(255, 138, 61, 230));
+	text(cx, 27, 0.5f, RGBA(20, 20, 20, 255), C2D_AlignCenter, "%s", toast);
+}
+
+static void legend_swatch(float y, u32 color, const char* label)
+{
+	C2D_DrawRectSolid(TOP_W - 16, y + 2, 0.8f, 8, 8, color);
+	text(TOP_W - 20, y - 1, 0.38f, CLR_DIM, C2D_AlignRight, "%s", label);
+}
+
+static void draw_top_bridge(float cx)
+{
+	char buf[200];
+	text(8, 4, 0.55f, CLR_ACCENT, 0, "BRIDGE");
+	int left = game.maxGuesses - game.guessCount;
+	text(TOP_W - 8, 4, 0.5f, left <= 1 && !game.won ? CLR_OFF : CLR_DIM, C2D_AlignRight, "Guesses left: %d", left);
+
+	legend_swatch(40, CLR_START, "start");
+	legend_swatch(56, CLR_END, "goal");
+	legend_swatch(76, CLR_ON, "on route");
+	legend_swatch(92, CLR_NEAR, "close");
+	legend_swatch(108, CLR_OFF, "off route");
+	if (game.gaveUp) legend_swatch(124, CLR_REVEAL, "solution");
+
+	C2D_DrawRectSolid(0, SCR_H - 34, 0.85f, TOP_W, 34, RGBA(0, 0, 0, 150));
+	if (game.won || game.gaveUp) {
+		if (game.won)
+			text(cx, SCR_H - 32, 0.55f, CLR_ON, C2D_AlignCenter, "Bridge built in %d guess%s!", game.guessCount,
+			     game.guessCount == 1 ? "" : "es");
+		else
+			text(cx, SCR_H - 32, 0.55f, CLR_OFF, C2D_AlignCenter, "%s One route was:",
+			     game.guessCount >= game.maxGuesses ? "Out of guesses." : "You gave up.");
+		chain_text(buf, sizeof(buf));
+		text_fit(cx, SCR_H - 15, 0.42f, TOP_W - 12, CLR_TEXT, C2D_AlignCenter, buf);
+	} else if (game.guessCount == 0) {
+		snprintf(buf, sizeof(buf), "Connect %s to %s", COUNTRIES[game.start].name, COUNTRIES[game.end].name);
+		text_fit(cx, SCR_H - 32, 0.52f, TOP_W - 12, CLR_TEXT, C2D_AlignCenter, buf);
+		text(cx, SCR_H - 15, 0.42f, CLR_DIM, C2D_AlignCenter, "using countries that share borders. Shortest bridge: %d countries.",
+		     game.minLinks);
+	} else {
+		int last = game.guesses[game.guessCount - 1];
+		RouteStatus r = bridge_route_status(&game, last);
+		u32 col = r == ROUTE_ON ? CLR_ON : (r == ROUTE_NEAR ? CLR_NEAR : CLR_OFF);
+		text(8, SCR_H - 32, 0.52f, col, 0, "%s", COUNTRIES[last].name);
+		text(TOP_W - 8, SCR_H - 32, 0.52f, col, C2D_AlignRight, "%s", route_label(r));
+		snprintf(buf, sizeof(buf), "%s  >  ...  >  %s", COUNTRIES[game.start].name, COUNTRIES[game.end].name);
+		text_fit(8, SCR_H - 15, 0.42f, TOP_W - 16, CLR_DIM, 0, buf);
+	}
+	draw_toast(cx);
+}
 
 static void draw_top(float time)
 {
@@ -245,7 +399,21 @@ static void draw_top(float time)
 	globe_draw(&view, countryColor, cx, cy);
 	int hl = game.guessCount > 0 ? game.guesses[game.guessCount - 1] : -1;
 	if (game.won || game.gaveUp) hl = game.target;
+	if (game.mode == MODE_BRIDGE && game.guessCount == 0) hl = game.end;
+	if (inMenu) hl = -1;
 	globe_draw_markers(&view, countryColor, markerMask, hl, time, cx, cy);
+
+	if (inMenu) {
+		C2D_DrawRectSolid(0, SCR_H - 46, 0.85f, TOP_W, 46, RGBA(0, 0, 0, 150));
+		text(cx, SCR_H - 46, 0.9f, CLR_ACCENT, C2D_AlignCenter, "GLOBE3DS");
+		text(cx, SCR_H - 18, 0.42f, CLR_DIM, C2D_AlignCenter, "Pick a game on the touch screen");
+		return;
+	}
+
+	if (game.mode == MODE_BRIDGE) {
+		draw_top_bridge(cx);
+		return;
+	}
 
 	// title & counter
 	text(8, 4, 0.55f, CLR_ACCENT, 0, "GLOBE3DS");
@@ -283,11 +451,7 @@ static void draw_top(float time)
 		text(8, SCR_H - 15, 0.42f, CLR_DIM, 0, "Closest so far: %s (%s)", COUNTRIES[game.closest].name, km);
 	}
 
-	if (toastTimer > 0) {
-		float w = text_width(0.5f, toast) + 20;
-		C2D_DrawRectSolid(cx - w / 2, 24, 0.95f, w, 22, RGBA(255, 138, 61, 230));
-		text(cx, 27, 0.5f, RGBA(20, 20, 20, 255), C2D_AlignCenter, "%s", toast);
-	}
+	draw_toast(cx);
 }
 
 // ---------------------------------------------------------------- bottom screen
@@ -343,7 +507,7 @@ static void draw_keyboard_view(void)
 
 static void draw_list_view(void)
 {
-	text(8, 8, 0.5f, CLR_TEXT, 0, "Guesses, closest first");
+	text(8, 8, 0.5f, CLR_TEXT, 0, game.mode == MODE_BRIDGE ? "Guesses, best first" : "Guesses, closest first");
 	draw_button(254, 4, 62, 24, CLR_KEY, CLR_TEXT, 0.45f, "Back (X)");
 	int order[MAX_GUESSES];
 	int n = sorted_guesses(order);
@@ -359,6 +523,11 @@ static void draw_list_view(void)
 		C2D_DrawRectSolid(4, y, 0.55f, 8, LIST_ROW - 2, countryColor[c]);
 		text(18, y + 3, 0.45f, CLR_DIM, 0, "%d", r + listScroll + 1);
 		text(42, y + 3, 0.48f, CLR_TEXT, 0, "%s", COUNTRIES[c].name);
+		if (game.mode == MODE_BRIDGE) {
+			RouteStatus rs = bridge_route_status(&game, c);
+			text(310, y + 4, 0.42f, countryColor[c], C2D_AlignRight, "%s", route_label(rs));
+			continue;
+		}
 		if (c == game.target) snprintf(km, sizeof(km), "Found!");
 		else fmt_km(km, country_distance(c, game.target));
 		text(310, y + 3, 0.48f, c == game.target ? CLR_FOUND : CLR_TEXT, C2D_AlignRight, "%s", km);
@@ -372,7 +541,13 @@ static void draw_list_view(void)
 
 static void draw_result_view(void)
 {
-	if (game.won) {
+	if (game.mode == MODE_BRIDGE) {
+		text(160, 14, 0.75f, game.won ? CLR_ON : CLR_ACCENT, C2D_AlignCenter, "%s",
+		     game.won ? "Bridge built!" : (game.guessCount >= game.maxGuesses ? "Out of guesses" : "Bridge abandoned"));
+		char buf[96];
+		snprintf(buf, sizeof(buf), "%s to %s", COUNTRIES[game.start].name, COUNTRIES[game.end].name);
+		text_fit(160, 42, 0.55f, 300, CLR_TEXT, C2D_AlignCenter, buf);
+	} else if (game.won) {
 		text(160, 14, 0.75f, CLR_FOUND, C2D_AlignCenter, "Found it!");
 		text(160, 42, 0.55f, CLR_TEXT, C2D_AlignCenter, "%s in %d guess%s", COUNTRIES[game.target].name,
 		     game.guessCount, game.guessCount == 1 ? "" : "es");
@@ -395,11 +570,26 @@ static void draw_result_view(void)
 	}
 	draw_button(20, 162, 135, 40, CLR_ACCENT, RGBA(20, 20, 20, 255), 0.55f, "New game (A)");
 	draw_button(165, 162, 135, 40, CLR_KEY, CLR_TEXT, 0.55f, "Guesses (X)");
-	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Circle Pad: spin   L/R: zoom   START: quit");
+	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Circle Pad: spin   L/R: zoom   START: menu");
+}
+
+static void draw_menu_view(void)
+{
+	text(160, 10, 0.7f, CLR_TEXT, C2D_AlignCenter, "Choose a game");
+	for (int i = 0; i < MODE_COUNT; i++) {
+		float y = 46 + i * 78;
+		bool sel = i == menuSel;
+		C2D_DrawRectSolid(16, y, 0.5f, 288, 68, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
+		C2D_DrawRectSolid(16, y, 0.55f, 4, 68, sel ? CLR_ACCENT : CLR_KEY);
+		text(30, y + 6, 0.65f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
+		text_fit(30, y + 36, 0.42f, 266, CLR_DIM, 0, MODE_DESC[i]);
+	}
+	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Tap a game or press A    START: quit");
 }
 
 static void draw_bottom(void)
 {
+	if (inMenu) { draw_menu_view(); return; }
 	if (bottomView == VIEW_LIST) draw_list_view();
 	else if (game.won || game.gaveUp) draw_result_view();
 	else draw_keyboard_view();
@@ -421,8 +611,13 @@ static void handle_touch(touchPosition t, u32 kDown, u32 kHeld)
 		return;
 	}
 	if (!(kDown & KEY_TOUCH)) return;
+	if (inMenu) {
+		for (int i = 0; i < MODE_COUNT; i++)
+			if (in_rect(t, 16, 46 + i * 78, 288, 68)) { menuSel = i; new_game((GameMode)i); }
+		return;
+	}
 	if (game.won || game.gaveUp) {
-		if (in_rect(t, 20, 162, 135, 40)) new_game();
+		if (in_rect(t, 20, 162, 135, 40)) new_game(game.mode);
 		else if (in_rect(t, 165, 162, 135, 40)) bottomView = VIEW_LIST;
 		return;
 	}
@@ -453,22 +648,32 @@ int main(int argc, char* argv[])
 	palette_init();
 	keyboard_init();
 	globe_init();
-	stats_load(&stats);
 	for (int i = 0; i < 90; i++) {
 		starX[i] = rand() % TOP_W; starY[i] = rand() % SCR_H; starA[i] = 60 + rand() % 180;
 	}
 	view.lat = 20; view.lon = 10; view.zoom = 1.0f;
-	new_game();
+	open_menu();
 
 	u64 start = osGetTime();
 	while (aptMainLoop()) {
 		hidScanInput();
 		u32 kDown = hidKeysDown(), kHeld = hidKeysHeld();
-		if (kDown & KEY_START) break;
+		touchPosition touch;
+		hidTouchRead(&touch);
+
+		if (inMenu) {
+			if (kDown & KEY_START) break;
+			if (kDown & KEY_DUP) menuSel = (menuSel + MODE_COUNT - 1) % MODE_COUNT;
+			if (kDown & KEY_DDOWN) menuSel = (menuSel + 1) % MODE_COUNT;
+			if (kDown & KEY_A) new_game((GameMode)menuSel);
+			else handle_touch(touch, kDown, kHeld);
+			goto globe_controls;
+		}
+		if (kDown & KEY_START) { open_menu(); goto globe_controls; }
 
 		bool over = game.won || game.gaveUp;
 		if (kDown & KEY_X) bottomView = bottomView == VIEW_LIST ? VIEW_KEYBOARD : VIEW_LIST;
-		if (over && (kDown & KEY_A)) new_game();
+		if (over && (kDown & KEY_A)) new_game(game.mode);
 		else if (!over && bottomView == VIEW_KEYBOARD) {
 			if ((kDown & KEY_DUP) && game.suggestSel > 0) game.suggestSel--;
 			if ((kDown & KEY_DDOWN) && game.suggestSel < game.suggestCount - 1) game.suggestSel++;
@@ -485,18 +690,17 @@ int main(int argc, char* argv[])
 				game_give_up(&game);
 				finish_game(false);
 				refresh_colors();
-				globe_focus(&view, COUNTRIES[game.target].lat, COUNTRIES[game.target].lon);
+				if (game.mode == MODE_BRIDGE) focus_between(game.start, game.end);
+				else globe_focus(&view, COUNTRIES[game.target].lat, COUNTRIES[game.target].lon);
 				confirmGiveUp = false;
 			} else confirmGiveUp = true;
 		}
 		// any other button cancels a pending give-up
 		if ((kDown & ~KEY_SELECT) && !(kDown & KEY_SELECT)) confirmGiveUp = false;
 
-		touchPosition touch;
-		hidTouchRead(&touch);
 		handle_touch(touch, kDown, kHeld);
 
-		// globe controls
+	globe_controls:;
 		circlePosition cp;
 		hidCircleRead(&cp);
 		float speed = 2.4f / view.zoom;
@@ -512,7 +716,8 @@ int main(int argc, char* argv[])
 		if (view.zoom < 1.0f) view.zoom = 1.0f;
 		if (view.zoom > 8.0f) view.zoom = 8.0f;
 		idleTimer = (moved || kDown) ? 0 : idleTimer + 1;
-		if (game.guessCount == 0 && !view.animating && idleTimer > 120) view.lon += 0.12f;
+		bool spin = inMenu || (game.mode == MODE_CLASSIC && game.guessCount == 0);
+		if (spin && !view.animating && idleTimer > 120) view.lon += 0.12f;
 		globe_view_update(&view);
 
 		if (toastTimer > 0) toastTimer--;

@@ -57,3 +57,5 @@ bool C2D_DrawEllipse(float x,float y,float z,float w,float h,u32 a,u32 b,u32 c,u
 	if (dumping) fprintf(out, "E %.1f %.1f %.1f %.1f %u %u\n", x,y,w,h,a,d); return true; }
 bool C2D_DrawLine(float x0,float y0,u32 c0,float x1,float y1,u32 c1,float th,float z) {
 	if (dumping) fprintf(out, "L %.1f %.1f %.1f %.1f %.1f %u\n", x0,y0,x1,y1,th,c0); return true; }
+#undef time
+time_t sim_time(time_t* t) { const char* s = getenv("SIM_SEED"); return s ? atol(s) : time(t); }

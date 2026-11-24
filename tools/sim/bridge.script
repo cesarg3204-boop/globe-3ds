@@ -1,0 +1,18 @@
+wait 10
+dump 10_menu
+touch 160 150
+wait 40
+dump 11_bridge_start
+type ecu
+key 1
+wait 60
+type colom
+key 1
+wait 60
+type per
+dump 14_typing
+key 1
+wait 90
+dump 15_bridge_won
+key 1024
+dump 16_bridge_list

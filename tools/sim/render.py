@@ -19,6 +19,9 @@ for line in open(log):
         off = (0, 0) if p[1] == "0" else (40, 240)
     elif p[0] == "C":
         x0, y0 = (0, 0) if p[1] == "0" else (40, 240)
+        if p[1] == "1":  # the top screen never draws past its own edge
+            img.alpha_composite(layer); layer = Image.new("RGBA", img.size, (0, 0, 0, 0)); d = ImageDraw.Draw(layer)
+            ImageDraw.Draw(img).rectangle([0, 240 * S, 400 * S, 480 * S], fill=(0, 0, 0, 255))
         ImageDraw.Draw(img).rectangle([x0 * S, y0 * S, (x0 + (400 if p[1] == "0" else 320)) * S - 1, (y0 + 240) * S - 1], fill=col(p[2]))
     else:
         def X(v): return (float(v) + off[0]) * S

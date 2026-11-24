@@ -1,12 +1,15 @@
 # Globe3DS
 
-A Nintendo 3DS homebrew game: a country is hidden somewhere on the globe, and you find it by guessing.
-Every guess is painted on a spinning 3D globe in a colour that shows how close it is to the hidden
-country. Icy blue means far away, orange and red mean you're getting warm.
+Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a mode from the menu:
+
+- **Classic:** a country is hidden somewhere on the globe, and you find it by guessing. Every guess is
+  painted in a colour that shows how close it is. Icy blue means far away, orange and red mean you're getting warm.
+- **Bridge:** you get a start country and a goal country, and you build a bridge between them out of
+  countries that share land borders.
 
 ![Playing](docs/screenshot-playing.png)
 
-## How to play
+## Classic
 
 - Type a country name on the touch keyboard. Suggestions appear as you type.
 - Tap a suggestion, press **Guess**, or press **A** to guess the highlighted one.
@@ -14,6 +17,20 @@ country. Icy blue means far away, orange and red mean you're getting warm.
   whether you got warmer or colder, and your closest guess so far.
 - A neighbouring country (sharing a border) is 0 km away.
 - Find it in as few guesses as you can.
+
+## Bridge
+
+![Bridge](docs/screenshot-bridge.png)
+
+- The start country is blue and the goal is pink. The top screen tells you the fewest countries a bridge needs.
+- Guess countries in any order. Each one is coloured by how useful it is:
+  **green** is on a shortest route, **yellow** is close to one (a route at most two countries longer), and **red** is off route.
+- The bridge is built as soon as your guesses link the start to the goal through shared borders.
+- You get the shortest bridge length plus 4 guesses. Run out and one shortest route is shown.
+- Only land borders count. Borders that exist only through overseas territories (France with Brazil and Suriname)
+  don't count, and small territories such as Hong Kong aren't used.
+
+## Controls
 
 | Button | Action |
 | --- | --- |
@@ -24,10 +41,10 @@ country. Icy blue means far away, orange and red mean you're getting warm.
 | X | Show or hide your guesses, sorted closest first |
 | Circle Pad | Spin the globe |
 | L / R | Zoom out / in |
-| SELECT twice | Give up and reveal the country |
-| START | Quit |
+| SELECT twice | Give up and reveal the answer |
+| START | Back to the menu (quit from the menu) |
 
-Your stats (games played, win rate, average guesses, streak) are saved to `sdmc:/3ds/globe3ds/stats.txt`.
+Your stats (games played, win rate, average guesses, streak) are saved per mode in `sdmc:/3ds/globe3ds/`.
 
 ## Installing
 
@@ -69,4 +86,7 @@ without a console:
 
 ```sh
 tools/sim/run.sh tools/sim/test.script /tmp/globe3ds-shots
+SIM_SEED=2 tools/sim/run.sh tools/sim/bridge.script /tmp/globe3ds-bridge
 ```
+
+`SIM_SEED` fixes the random puzzle so a script can be replayed.
