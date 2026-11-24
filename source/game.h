@@ -6,7 +6,8 @@
 #define MAX_SUGGEST 3
 
 typedef enum { RESULT_NONE, RESULT_NEW, RESULT_REPEAT, RESULT_WIN, RESULT_ENDPOINT, RESULT_LOSE } GuessResult;
-typedef enum { MODE_CLASSIC, MODE_BRIDGE, MODE_COUNT } GameMode;
+typedef enum { MODE_CLASSIC, MODE_BRIDGE, MODE_BRIDGE_HARD, MODE_COUNT } GameMode;
+static inline bool is_bridge(GameMode m) { return m == MODE_BRIDGE || m == MODE_BRIDGE_HARD; }
 // Bridge mode: how a guessed country relates to the shortest land routes between the two ends
 typedef enum { ROUTE_ON, ROUTE_NEAR, ROUTE_OFF } RouteStatus;
 
@@ -19,7 +20,7 @@ typedef struct {
 	// bridge mode
 	int start, end;         // countries to connect
 	int minLinks;           // fewest countries needed between start and end
-	int maxGuesses;
+	int maxGuesses;         // 0 = no limit (normal bridge)
 	unsigned char hopFromStart[512], hopFromEnd[512]; // land-border steps, 255 = unreachable
 	int lastRoute;          // RouteStatus of the last guess
 	int chain[MAX_CHAIN];   // winning chain (start..end) or a revealed solution

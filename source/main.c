@@ -119,10 +119,11 @@ static Game game;
 static Stats stats;
 static bool inMenu = true;
 static int menuSel = 0;
-static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge" };
+static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge", "Bridge: Hard" };
 static const char* MODE_DESC[MODE_COUNT] = {
 	"Find the hidden country by how far each guess is.",
-	"Link two countries through bordering countries.",
+	"Link two countries through neighbours. No limit.",
+	"Same, but only the shortest length + 4 guesses.",
 };
 static GlobeView view;
 static BottomView bottomView = VIEW_KEYBOARD;
@@ -170,7 +171,7 @@ static void refresh_colors(void)
 		markerMask[i] = 0;
 	}
 	if (inMenu) return;
-	if (game.mode == MODE_BRIDGE) {
+	if (is_bridge(game.mode)) {
 		static const u32* routeColor[3] = { &CLR_ON, &CLR_NEAR, &CLR_OFF };
 		if (game.gaveUp)
 			for (int i = 0; i < game.chainLen; i++) { countryColor[game.chain[i]] = CLR_REVEAL; markerMask[game.chain[i]] = 1; }
@@ -228,7 +229,7 @@ static void new_game(GameMode mode)
 	listScroll = 0;
 	confirmGiveUp = false;
 	view.animating = false;
-	if (mode == MODE_BRIDGE) {
+	if (is_bridge(mode)) {
 		focus_between(game.start, game.end);
 		view.lat = view.tlat; view.lon = view.tlon; view.animating = false;  // jump straight there
 		zoom_to_fit(game.start, game.end);
@@ -274,7 +275,7 @@ static void submit_guess(int c)
 	confirmGiveUp = false;
 	if (r == RESULT_WIN) finish_game(true);
 	if (r == RESULT_LOSE) finish_game(false);
-	if (game.mode == MODE_BRIDGE && (r == RESULT_WIN || r == RESULT_LOSE)) focus_between(game.start, game.end);
+	if (is_bridge(game.mode) && (r == RESULT_WIN || r == RESULT_LOSE)) focus_between(game.start, game.end);
 }
 
 static void type_char(char ch)
@@ -293,7 +294,7 @@ static void type_char(char ch)
 // sorting key for the guess list: classic = distance, bridge = route status (stable)
 static int guess_rank(int c)
 {
-	return game.mode == MODE_BRIDGE ? (int)bridge_route_status(&game, c) : country_distance(c, game.target);
+	return is_bridge(game.mode) ? (int)bridge_route_status(&game, c) : country_distance(c, game.target);
 }
 
 // sorted copy of guesses, best first
@@ -348,9 +349,13 @@ static void legend_swatch(float y, u32 color, const char* label)
 static void draw_top_bridge(float cx)
 {
 	char buf[200];
-	text(8, 4, 0.55f, CLR_ACCENT, 0, "BRIDGE");
-	int left = game.maxGuesses - game.guessCount;
-	text(TOP_W - 8, 4, 0.5f, left <= 1 && !game.won ? CLR_OFF : CLR_DIM, C2D_AlignRight, "Guesses left: %d", left);
+	text(8, 4, 0.55f, CLR_ACCENT, 0, game.maxGuesses ? "BRIDGE: HARD" : "BRIDGE");
+	if (game.maxGuesses) {
+		int left = game.maxGuesses - game.guessCount;
+		text(TOP_W - 8, 4, 0.5f, left <= 1 && !game.won ? CLR_OFF : CLR_DIM, C2D_AlignRight, "Guesses left: %d", left);
+	} else {
+		text(TOP_W - 8, 4, 0.5f, CLR_DIM, C2D_AlignRight, "Guesses: %d", game.guessCount);
+	}
 
 	legend_swatch(40, CLR_START, "start");
 	legend_swatch(56, CLR_END, "goal");
@@ -366,7 +371,7 @@ static void draw_top_bridge(float cx)
 			     game.guessCount == 1 ? "" : "es");
 		else
 			text(cx, SCR_H - 32, 0.55f, CLR_OFF, C2D_AlignCenter, "%s One route was:",
-			     game.guessCount >= game.maxGuesses ? "Out of guesses." : "You gave up.");
+			     game.maxGuesses && game.guessCount >= game.maxGuesses ? "Out of guesses." : "You gave up.");
 		chain_text(buf, sizeof(buf));
 		text_fit(cx, SCR_H - 15, 0.42f, TOP_W - 12, CLR_TEXT, C2D_AlignCenter, buf);
 	} else if (game.guessCount == 0) {
@@ -399,7 +404,7 @@ static void draw_top(float time)
 	globe_draw(&view, countryColor, cx, cy);
 	int hl = game.guessCount > 0 ? game.guesses[game.guessCount - 1] : -1;
 	if (game.won || game.gaveUp) hl = game.target;
-	if (game.mode == MODE_BRIDGE && game.guessCount == 0) hl = game.end;
+	if (is_bridge(game.mode) && game.guessCount == 0) hl = game.end;
 	if (inMenu) hl = -1;
 	globe_draw_markers(&view, countryColor, markerMask, hl, time, cx, cy);
 
@@ -410,7 +415,7 @@ static void draw_top(float time)
 		return;
 	}
 
-	if (game.mode == MODE_BRIDGE) {
+	if (is_bridge(game.mode)) {
 		draw_top_bridge(cx);
 		return;
 	}
@@ -507,7 +512,7 @@ static void draw_keyboard_view(void)
 
 static void draw_list_view(void)
 {
-	text(8, 8, 0.5f, CLR_TEXT, 0, game.mode == MODE_BRIDGE ? "Guesses, best first" : "Guesses, closest first");
+	text(8, 8, 0.5f, CLR_TEXT, 0, is_bridge(game.mode) ? "Guesses, best first" : "Guesses, closest first");
 	draw_button(254, 4, 62, 24, CLR_KEY, CLR_TEXT, 0.45f, "Back (X)");
 	int order[MAX_GUESSES];
 	int n = sorted_guesses(order);
@@ -523,7 +528,7 @@ static void draw_list_view(void)
 		C2D_DrawRectSolid(4, y, 0.55f, 8, LIST_ROW - 2, countryColor[c]);
 		text(18, y + 3, 0.45f, CLR_DIM, 0, "%d", r + listScroll + 1);
 		text(42, y + 3, 0.48f, CLR_TEXT, 0, "%s", COUNTRIES[c].name);
-		if (game.mode == MODE_BRIDGE) {
+		if (is_bridge(game.mode)) {
 			RouteStatus rs = bridge_route_status(&game, c);
 			text(310, y + 4, 0.42f, countryColor[c], C2D_AlignRight, "%s", route_label(rs));
 			continue;
@@ -541,9 +546,9 @@ static void draw_list_view(void)
 
 static void draw_result_view(void)
 {
-	if (game.mode == MODE_BRIDGE) {
+	if (is_bridge(game.mode)) {
 		text(160, 14, 0.75f, game.won ? CLR_ON : CLR_ACCENT, C2D_AlignCenter, "%s",
-		     game.won ? "Bridge built!" : (game.guessCount >= game.maxGuesses ? "Out of guesses" : "Bridge abandoned"));
+		     game.won ? "Bridge built!" : (game.maxGuesses && game.guessCount >= game.maxGuesses ? "Out of guesses" : "Bridge abandoned"));
 		char buf[96];
 		snprintf(buf, sizeof(buf), "%s to %s", COUNTRIES[game.start].name, COUNTRIES[game.end].name);
 		text_fit(160, 42, 0.55f, 300, CLR_TEXT, C2D_AlignCenter, buf);
@@ -577,12 +582,12 @@ static void draw_menu_view(void)
 {
 	text(160, 10, 0.7f, CLR_TEXT, C2D_AlignCenter, "Choose a game");
 	for (int i = 0; i < MODE_COUNT; i++) {
-		float y = 46 + i * 78;
+		float y = 40 + i * 58;
 		bool sel = i == menuSel;
-		C2D_DrawRectSolid(16, y, 0.5f, 288, 68, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
-		C2D_DrawRectSolid(16, y, 0.55f, 4, 68, sel ? CLR_ACCENT : CLR_KEY);
-		text(30, y + 6, 0.65f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
-		text_fit(30, y + 36, 0.42f, 266, CLR_DIM, 0, MODE_DESC[i]);
+		C2D_DrawRectSolid(16, y, 0.5f, 288, 52, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
+		C2D_DrawRectSolid(16, y, 0.55f, 4, 52, sel ? CLR_ACCENT : CLR_KEY);
+		text(30, y + 4, 0.6f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
+		text_fit(30, y + 30, 0.42f, 266, CLR_DIM, 0, MODE_DESC[i]);
 	}
 	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Tap a game or press A    START: quit");
 }
@@ -613,7 +618,7 @@ static void handle_touch(touchPosition t, u32 kDown, u32 kHeld)
 	if (!(kDown & KEY_TOUCH)) return;
 	if (inMenu) {
 		for (int i = 0; i < MODE_COUNT; i++)
-			if (in_rect(t, 16, 46 + i * 78, 288, 68)) { menuSel = i; new_game((GameMode)i); }
+			if (in_rect(t, 16, 40 + i * 58, 288, 52)) { menuSel = i; new_game((GameMode)i); }
 		return;
 	}
 	if (game.won || game.gaveUp) {
@@ -690,7 +695,7 @@ int main(int argc, char* argv[])
 				game_give_up(&game);
 				finish_game(false);
 				refresh_colors();
-				if (game.mode == MODE_BRIDGE) focus_between(game.start, game.end);
+				if (is_bridge(game.mode)) focus_between(game.start, game.end);
 				else globe_focus(&view, COUNTRIES[game.target].lat, COUNTRIES[game.target].lon);
 				confirmGiveUp = false;
 			} else confirmGiveUp = true;

@@ -99,7 +99,7 @@ void game_new(Game* g, GameMode mode)
 	short parent[512];
 	bfs(g->end, NULL, g->hopFromEnd, parent);
 	g->minLinks = g->hopFromStart[g->end] - 1;
-	g->maxGuesses = g->minLinks + BRIDGE_EXTRA_GUESSES;
+	g->maxGuesses = mode == MODE_BRIDGE_HARD ? g->minLinks + BRIDGE_EXTRA_GUESSES : 0;
 	g->target = g->end;
 	g->guessed[g->start] = g->guessed[g->end] = true;
 	// keep one shortest route to reveal if the player runs out of guesses.
@@ -156,7 +156,7 @@ void game_update_suggestions(Game* g)
 	int scores[MAX_SUGGEST];
 	for (int i = 0; i < COUNTRY_COUNT; i++) {
 		if (g->guessed[i]) continue;
-		if (g->mode == MODE_BRIDGE && !COUNTRIES[i].target) continue;
+		if (is_bridge(g->mode) && !COUNTRIES[i].target) continue;
 		int s = match_score(COUNTRIES[i].keys, q, qlen);
 		if (s < 0) continue;
 		// insertion into a tiny sorted list (score, then alphabetical = index order)
@@ -193,7 +193,7 @@ static GuessResult bridge_guess(Game* g, int c)
 		g->won = true;
 		return RESULT_WIN;
 	}
-	if (g->guessCount >= g->maxGuesses) {
+	if (g->maxGuesses && g->guessCount >= g->maxGuesses) {
 		g->gaveUp = true;
 		return RESULT_LOSE;
 	}
@@ -204,7 +204,7 @@ GuessResult game_guess(Game* g, int c)
 {
 	if (g->won || g->gaveUp || c < 0) return RESULT_NONE;
 	if (g->guessCount >= MAX_GUESSES) return RESULT_NONE;
-	if (g->mode == MODE_BRIDGE) return bridge_guess(g, c);
+	if (is_bridge(g->mode)) return bridge_guess(g, c);
 	if (g->guessed[c]) return RESULT_REPEAT;
 	g->guessed[c] = true;
 	g->guesses[g->guessCount++] = c;
@@ -227,7 +227,8 @@ void game_give_up(Game* g)
 }
 
 #define STATS_DIR "sdmc:/3ds/globe3ds"
-static const char* STATS_FILES[MODE_COUNT] = { STATS_DIR "/stats.txt", STATS_DIR "/stats_bridge.txt" };
+static const char* STATS_FILES[MODE_COUNT] = { STATS_DIR "/stats.txt", STATS_DIR "/stats_bridge.txt",
+                                                  STATS_DIR "/stats_bridge_hard.txt" };
 
 void stats_load(Stats* s, GameMode mode)
 {

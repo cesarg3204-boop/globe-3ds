@@ -1,6 +1,6 @@
 wait 10
 dump 10_menu
-touch 160 150
+touch 160 120
 wait 40
 dump 11_bridge_start
 type ecu
