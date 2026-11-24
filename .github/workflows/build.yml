@@ -18,36 +18,46 @@ jobs:
     container: devkitpro/devkitarm:latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Build .3dsx
         run: make
+      - uses: actions/upload-artifact@v4
+        with:
+          name: program
+          path: |
+            Globe3DS.3dsx
+            Globe3DS.elf
 
+  # makerom needs a newer glibc than the devkitPro image has, so the .cia is packed on the plain runner
+  cia:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: program
       - name: Install CIA tools
         run: |
-          apt-get update -qq && apt-get install -y -qq unzip curl > /dev/null
           mkdir -p /tmp/tools && cd /tmp/tools
           curl -sSL -o makerom.zip "$MAKEROM_URL" && unzip -oq makerom.zip
           curl -sSL -o bannertool.zip "$BANNERTOOL_URL" && unzip -oq bannertool.zip
-          cp "$(find . -type f -name makerom | head -n1)" /usr/local/bin/makerom
-          cp "$(find . -type f -path '*linux-x86_64*' -name bannertool | head -n1)" /usr/local/bin/bannertool
-          chmod +x /usr/local/bin/makerom /usr/local/bin/bannertool
-
+          sudo install -m 755 "$(find . -type f -name makerom | head -n1)" /usr/local/bin/makerom
+          sudo install -m 755 "$(find . -type f -path '*linux-x86_64*' -name bannertool | head -n1)" /usr/local/bin/bannertool
       - name: Build .cia
         run: |
+          mkdir -p build
           bannertool makebanner -i cia/banner.png -a cia/audio.wav -o build/banner.bnr
           bannertool makesmdh -s "Globe3DS" -l "Globe3DS: country guessing games on a 3D globe" \
             -p "cesarg3204-boop" -i icon.png -o build/icon.icn
           makerom -f cia -o Globe3DS.cia -elf Globe3DS.elf -rsf cia/globe3ds.rsf \
             -icon build/icon.icn -banner build/banner.bnr -target t -exefslogo
           ls -la Globe3DS.cia Globe3DS.3dsx
-
       - uses: actions/upload-artifact@v4
         with:
           name: Globe3DS
           path: |
             Globe3DS.3dsx
             Globe3DS.cia
-
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
