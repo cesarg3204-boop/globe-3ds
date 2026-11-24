@@ -1,5 +1,5 @@
 wait 10
-touch 160 185
+touch 160 182
 wait 30
 dump 30_explore_start
 circle 0 150

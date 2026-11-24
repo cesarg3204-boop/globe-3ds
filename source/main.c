@@ -131,14 +131,22 @@ static int exploreSel = -1;     // country picked from the search in Explore
 static int exploreHover = -1;   // country under the crosshair
 static float hoverLat = 999, hoverLon = 999;
 
-static int menuSel = 0;
-static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge", "Bridge: Hard", "Explore" };
-static const char* MODE_DESC[MODE_COUNT] = {
-	"Find the hidden country by how far each guess is.",
-	"Link two countries through neighbours. No limit.",
-	"Same, but only the shortest length + 4 guesses.",
-	"Practice: browse the world map and look up countries.",
+// Menu pages. An item either starts a game mode or opens/leaves the Bridge page.
+enum { MENU_BRIDGE = -1, MENU_BACK = -2 };
+typedef struct { const char* name; const char* desc; int action; } MenuItem;
+static const MenuItem MAIN_MENU[] = {
+	{ "Classic", "Find the hidden country by how far each guess is.", MODE_CLASSIC },
+	{ "Bridge", "Link two countries through bordering countries.", MENU_BRIDGE },
+	{ "Explore", "Practice: browse the map and look up countries.", MODE_EXPLORE },
 };
+static const MenuItem BRIDGE_MENU[] = {
+	{ "Normal", "No guess limit. Keep going until the bridge is built.", MODE_BRIDGE },
+	{ "Hard", "Only the shortest bridge length + 4 guesses.", MODE_BRIDGE_HARD },
+	{ "Back", "Return to the list of games.", MENU_BACK },
+};
+#define MENU_ITEMS 3
+static bool bridgePage = false;
+static int menuSel = 0;
 static GlobeView view;
 static BottomView bottomView = VIEW_KEYBOARD;
 static u32 countryColor[512];
@@ -266,6 +274,9 @@ static void new_game(GameMode mode)
 static void open_menu(void)
 {
 	inMenu = true;
+	bridgePage = false;
+	view.zoom = 1.0f;
+	menuSel = is_bridge(game.mode) ? 1 : (game.mode == MODE_EXPLORE ? 2 : 0);
 	bottomView = VIEW_KEYBOARD;
 	confirmGiveUp = false;
 	refresh_colors();
@@ -720,16 +731,27 @@ static void draw_result_view(void)
 
 static void draw_menu_view(void)
 {
-	text(160, 6, 0.62f, CLR_TEXT, C2D_AlignCenter, "Choose a game");
-	for (int i = 0; i < MODE_COUNT; i++) {
-		float y = 34 + i * 44;
+	const MenuItem* items = bridgePage ? BRIDGE_MENU : MAIN_MENU;
+	text(160, 8, 0.62f, CLR_TEXT, C2D_AlignCenter, bridgePage ? "Bridge: choose a difficulty" : "Choose a game");
+	for (int i = 0; i < MENU_ITEMS; i++) {
+		float y = 40 + i * 58;
 		bool sel = i == menuSel;
-		C2D_DrawRectSolid(16, y, 0.5f, 288, 40, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
-		C2D_DrawRectSolid(16, y, 0.55f, 4, 40, sel ? CLR_ACCENT : CLR_KEY);
-		text(28, y + 2, 0.52f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
-		text_fit(28, y + 22, 0.38f, 270, CLR_DIM, 0, MODE_DESC[i]);
+		C2D_DrawRectSolid(16, y, 0.5f, 288, 52, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
+		C2D_DrawRectSolid(16, y, 0.55f, 4, 52, sel ? CLR_ACCENT : CLR_KEY);
+		text(30, y + 4, 0.6f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s%s", items[i].name,
+		     items[i].action == MENU_BRIDGE ? "  >" : "");
+		text_fit(30, y + 30, 0.42f, 266, CLR_DIM, 0, items[i].desc);
 	}
-	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Tap a game or press A    START: quit");
+	text(160, 216, 0.4f, CLR_DIM, C2D_AlignCenter,
+	     bridgePage ? "Tap or press A    B: back" : "Tap a game or press A    START: quit");
+}
+
+static void menu_activate(int i)
+{
+	int action = (bridgePage ? BRIDGE_MENU : MAIN_MENU)[i].action;
+	if (action == MENU_BRIDGE) { bridgePage = true; menuSel = 0; }
+	else if (action == MENU_BACK) { bridgePage = false; menuSel = 1; }
+	else new_game((GameMode)action);
 }
 
 static void draw_bottom(void)
@@ -757,8 +779,8 @@ static void handle_touch(touchPosition t, u32 kDown, u32 kHeld)
 	}
 	if (!(kDown & KEY_TOUCH)) return;
 	if (inMenu) {
-		for (int i = 0; i < MODE_COUNT; i++)
-			if (in_rect(t, 16, 34 + i * 44, 288, 40)) { menuSel = i; new_game((GameMode)i); }
+		for (int i = 0; i < MENU_ITEMS; i++)
+			if (in_rect(t, 16, 40 + i * 58, 288, 52)) { menuSel = i; menu_activate(i); return; }
 		return;
 	}
 	if (game.won || game.gaveUp) {
@@ -812,9 +834,10 @@ int main(int argc, char* argv[])
 
 		if (inMenu) {
 			if (kDown & KEY_START) break;
-			if (kDown & KEY_DUP) menuSel = (menuSel + MODE_COUNT - 1) % MODE_COUNT;
-			if (kDown & KEY_DDOWN) menuSel = (menuSel + 1) % MODE_COUNT;
-			if (kDown & KEY_A) new_game((GameMode)menuSel);
+			if (kDown & KEY_DUP) menuSel = (menuSel + MENU_ITEMS - 1) % MENU_ITEMS;
+			if (kDown & KEY_DDOWN) menuSel = (menuSel + 1) % MENU_ITEMS;
+			if ((kDown & KEY_B) && bridgePage) { bridgePage = false; menuSel = 1; }
+			if (kDown & KEY_A) menu_activate(menuSel);
 			else handle_touch(touch, kDown, kHeld);
 			goto globe_controls;
 		}

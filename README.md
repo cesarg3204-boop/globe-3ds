@@ -4,7 +4,7 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
 
 - **Classic:** a country is hidden somewhere on the globe, and you find it by guessing. Every guess is
   painted in a colour that shows how close it is. Icy blue means far away, orange and red mean you're getting warm.
-- **Bridge** and **Bridge: Hard:** you get a start country and a goal country, and you build a bridge between them out of
+- **Bridge** (pick Normal or Hard): you get a start country and a goal country, and you build a bridge between them out of
   countries that share land borders.
 - **Explore:** a practice map. Browse a colourful political map of the world, see which country is under the
   crosshair, and type a country to fly to it and see its neighbours.
@@ -28,8 +28,8 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
 - Guess countries in any order. Each one is coloured by how useful it is:
   **green** is on a shortest route, **yellow** is close to one (a route at most two countries longer), and **red** is off route.
 - The bridge is built as soon as your guesses link the start to the goal through shared borders.
-- **Bridge** (normal) has no guess limit: keep going until the bridge is built.
-- **Bridge: Hard** gives you only the shortest bridge length plus 4 guesses. Run out and one shortest route is shown.
+- **Normal** has no guess limit: keep going until the bridge is built.
+- **Hard** gives you only the shortest bridge length plus 4 guesses. Run out and one shortest route is shown.
 - Either way, SELECT twice gives up and shows a shortest route.
 - Only land borders count. Borders that exist only through overseas territories (France with Brazil and Suriname)
   don't count, and small territories such as Hong Kong aren't used.
