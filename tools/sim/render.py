@@ -19,12 +19,17 @@ for line in open(log):
         off = (0, 0) if p[1] == "0" else (40, 240)
     elif p[0] == "C":
         x0, y0 = (0, 0) if p[1] == "0" else (40, 240)
+        if p[1] == "1":  # the top screen never draws past its own edge
+            img.alpha_composite(layer); layer = Image.new("RGBA", img.size, (0, 0, 0, 0)); d = ImageDraw.Draw(layer)
+            ImageDraw.Draw(img).rectangle([0, 240 * S, 400 * S, 480 * S], fill=(0, 0, 0, 255))
         ImageDraw.Draw(img).rectangle([x0 * S, y0 * S, (x0 + (400 if p[1] == "0" else 320)) * S - 1, (y0 + 240) * S - 1], fill=col(p[2]))
     else:
         def X(v): return (float(v) + off[0]) * S
         def Y(v): return (float(v) + off[1]) * S
         if p[0] == "P":
-            d.polygon([(X(p[1]), Y(p[2])), (X(p[3]), Y(p[4])), (X(p[5]), Y(p[6]))], fill=col(p[7]))
+            cs = [col(v) for v in p[7:10]]  # average the vertex colours (the 3DS blends them smoothly)
+            avg = tuple(sum(c[k] for c in cs) // 3 for k in range(4))
+            d.polygon([(X(p[1]), Y(p[2])), (X(p[3]), Y(p[4])), (X(p[5]), Y(p[6]))], fill=avg)
         elif p[0] == "L":
             d.line([(X(p[1]), Y(p[2])), (X(p[3]), Y(p[4]))], fill=col(p[6]), width=max(1, int(float(p[5]) * S)))
         elif p[0] == "R":

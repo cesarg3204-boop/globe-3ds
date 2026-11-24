@@ -1,3 +1,6 @@
+wait 10
+touch 160 66
+wait 5
 wait 30
 dump 01_start
 type germ

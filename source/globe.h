@@ -19,3 +19,5 @@ void globe_draw(const GlobeView* v, const u32* countryColor, float cx, float cy)
 // Draw dots for small countries in markerMask (non-zero entries), after the globe.
 void globe_draw_markers(const GlobeView* v, const u32* countryColor, const unsigned char* markerMask,
                         int highlight, float t, float cx, float cy);
+// Country containing the point (degrees), or -1 for ocean.
+int globe_country_at(float lat, float lon);

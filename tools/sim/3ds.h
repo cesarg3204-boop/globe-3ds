@@ -15,3 +15,7 @@ typedef int CFG_Region;
 void gfxInitDefault(void); void gfxExit(void);
 bool aptMainLoop(void); void hidScanInput(void); u32 hidKeysDown(void); u32 hidKeysHeld(void);
 void hidTouchRead(touchPosition*); void hidCircleRead(circlePosition*); u64 osGetTime(void);
+// deterministic clock for repeatable test runs (SIM_SEED environment variable)
+#include <time.h>
+time_t sim_time(time_t*);
+#define time(x) sim_time(x)

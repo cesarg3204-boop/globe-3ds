@@ -10,16 +10,18 @@ static C3D_RenderTarget targets[2];
 void gfxInitDefault(void) { script = fopen(getenv("SIM_SCRIPT"), "r"); out = fopen(getenv("SIM_OUT"), "w"); }
 void gfxExit(void) { fclose(out); }
 static u32 prevHeld;
+static int waitFrames = 0;
 bool aptMainLoop(void) {
 	char line[256];
 	down = 0; dumping = 0;
+	if (waitFrames > 0) { waitFrames--; held = 0; cp.dx = cp.dy = 0; frame++; return true; }
 	for (;;) {
 		if (!fgets(line, sizeof line, script)) return false;
 		if (line[0] == '#' || line[0] == '\n') continue;
 		char cmd[32]; int a = 0, b = 0;
 		char arg[64] = "";
 		sscanf(line, "%31s %63s", cmd, arg);
-		if (!strcmp(cmd, "wait")) { int n = atoi(arg); held = 0; cp.dx = cp.dy = 0; for (int i = 1; i < n; i++) { frame++; } break; }
+		if (!strcmp(cmd, "wait")) { waitFrames = atoi(arg) - 1; held = 0; cp.dx = cp.dy = 0; break; }
 		if (!strcmp(cmd, "key")) { u32 k = strtoul(arg, 0, 0); down = k; held = k; break; }
 		if (!strcmp(cmd, "hold")) { int n; sscanf(line, "%*s %s %d", arg, &n); held = strtoul(arg,0,0); down = 0; frame += n; break; }
 		if (!strcmp(cmd, "touch")) { sscanf(line, "%*s %d %d", &a, &b); tp.px = a; tp.py = b; down = KEY_TOUCH; held = KEY_TOUCH; break; }
@@ -50,10 +52,12 @@ void C2D_TargetClear(C3D_RenderTarget* t, u32 c) { if (dumping) fprintf(out, "C 
 void C2D_SceneBegin(C3D_RenderTarget* t) { if (dumping) fprintf(out, "S %d\n", t->screen); }
 static int tris;
 bool C2D_DrawTriangle(float x0,float y0,u32 c0,float x1,float y1,u32 c1,float x2,float y2,u32 c2,float z) {
-	if (dumping) fprintf(out, "P %.1f %.1f %.1f %.1f %.1f %.1f %u\n", x0,y0,x1,y1,x2,y2,c0); return true; }
+	if (dumping) fprintf(out, "P %.1f %.1f %.1f %.1f %.1f %.1f %u %u %u\n", x0,y0,x1,y1,x2,y2,c0,c1,c2); return true; }
 bool C2D_DrawRectangle(float x,float y,float z,float w,float h,u32 a,u32 b,u32 c,u32 d) {
 	if (dumping) fprintf(out, "R %.1f %.1f %.1f %.1f %u\n", x,y,w,h,a); return true; }
 bool C2D_DrawEllipse(float x,float y,float z,float w,float h,u32 a,u32 b,u32 c,u32 d) {
 	if (dumping) fprintf(out, "E %.1f %.1f %.1f %.1f %u %u\n", x,y,w,h,a,d); return true; }
 bool C2D_DrawLine(float x0,float y0,u32 c0,float x1,float y1,u32 c1,float th,float z) {
 	if (dumping) fprintf(out, "L %.1f %.1f %.1f %.1f %.1f %u\n", x0,y0,x1,y1,th,c0); return true; }
+#undef time
+time_t sim_time(time_t* t) { const char* s = getenv("SIM_SEED"); return s ? atol(s) : time(t); }
