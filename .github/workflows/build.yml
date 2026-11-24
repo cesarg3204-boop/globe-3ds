@@ -4,6 +4,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v1.0.0"
+        required: true
 
 permissions:
   contents: write   # lets a tag push publish a release
@@ -59,9 +64,12 @@ jobs:
             Globe3DS.3dsx
             Globe3DS.cia
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Globe3DS ${{ inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: |
             Globe3DS.3dsx
             Globe3DS.cia
