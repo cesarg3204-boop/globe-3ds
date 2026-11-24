@@ -129,3 +129,26 @@ void globe_draw_markers(const GlobeView* v, const u32* countryColor, const unsig
 		}
 	}
 }
+
+// Which country covers this point? Returns -1 for ocean. Tests the same triangles that are drawn.
+int globe_country_at(float lat, float lon)
+{
+	float px = lon * 100.0f, py = lat * 100.0f;
+	for (int c = 0; c < COUNTRY_COUNT; c++) {
+		const Country* k = &COUNTRIES[c];
+		const unsigned short* t = &TRIS[k->tstart * 3];
+		const short* v = &VERTS[k->vstart * 2];
+		for (int i = 0; i < k->tcount; i++, t += 3) {
+			float ax = v[t[0] * 2], ay = v[t[0] * 2 + 1], bx = v[t[1] * 2], by = v[t[1] * 2 + 1];
+			float cx = v[t[2] * 2], cy = v[t[2] * 2 + 1];
+			if ((px < ax && px < bx && px < cx) || (px > ax && px > bx && px > cx)) continue;
+			if ((py < ay && py < by && py < cy) || (py > ay && py > by && py > cy)) continue;
+			float d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+			float d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+			float d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+			bool neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+			if (!(neg && pos)) return c;
+		}
+	}
+	return -1;
+}

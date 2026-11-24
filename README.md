@@ -6,6 +6,8 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
   painted in a colour that shows how close it is. Icy blue means far away, orange and red mean you're getting warm.
 - **Bridge** and **Bridge: Hard:** you get a start country and a goal country, and you build a bridge between them out of
   countries that share land borders.
+- **Explore:** a practice map. Browse a colourful political map of the world, see which country is under the
+  crosshair, and type a country to fly to it and see its neighbours.
 
 ![Playing](docs/screenshot-playing.png)
 
@@ -31,6 +33,15 @@ Nintendo 3DS homebrew country games on a spinning 3D globe. Pick a game from the
 - Either way, SELECT twice gives up and shows a shortest route.
 - Only land borders count. Borders that exist only through overseas territories (France with Brazil and Suriname)
   don't count, and small territories such as Hong Kong aren't used.
+
+## Explore
+
+![Explore](docs/screenshot-explore.png)
+
+- Move the globe with the Circle Pad. The country under the crosshair is named on the top screen, and its
+  bordering countries are listed on the touch screen.
+- Type a country and press **Go** (or A) to fly to it. It turns orange and its neighbours turn pale gold.
+- X clears the selection.
 
 ## Controls
 

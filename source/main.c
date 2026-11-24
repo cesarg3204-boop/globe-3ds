@@ -22,7 +22,7 @@
 static u32 CLR_SPACE, CLR_OCEAN_A, CLR_OCEAN_B, CLR_GLOW, CLR_BG, CLR_PANEL, CLR_KEY, CLR_KEY_DOWN,
 	CLR_TEXT, CLR_DIM, CLR_ACCENT, CLR_FOUND, CLR_WHITE, CLR_START, CLR_END, CLR_ON, CLR_NEAR, CLR_OFF,
 	CLR_REVEAL;
-static u32 LAND[8];
+static u32 LAND[8], POLITICAL[8];
 
 static void palette_init(void)
 {
@@ -45,6 +45,15 @@ static void palette_init(void)
 	CLR_NEAR = RGBA(245, 200, 60, 255);
 	CLR_OFF = RGBA(205, 80, 72, 255);
 	CLR_REVEAL = RGBA(230, 232, 240, 255);
+	// brighter map colours for Explore, so neighbouring countries are easy to tell apart
+	POLITICAL[0] = RGBA(196, 170, 120, 255);
+	POLITICAL[1] = RGBA(150, 186, 120, 255);
+	POLITICAL[2] = RGBA(214, 150, 120, 255);
+	POLITICAL[3] = RGBA(180, 160, 200, 255);
+	POLITICAL[4] = RGBA(120, 176, 170, 255);
+	POLITICAL[5] = RGBA(220, 196, 110, 255);
+	POLITICAL[6] = RGBA(200, 130, 150, 255);
+	POLITICAL[7] = RGBA(140, 160, 200, 255);
 	// muted land tones for countries not guessed yet
 	LAND[0] = RGBA(120, 126, 112, 255);
 	LAND[1] = RGBA(126, 132, 116, 255);
@@ -118,12 +127,17 @@ typedef enum { VIEW_KEYBOARD, VIEW_LIST } BottomView;
 static Game game;
 static Stats stats;
 static bool inMenu = true;
+static int exploreSel = -1;     // country picked from the search in Explore
+static int exploreHover = -1;   // country under the crosshair
+static float hoverLat = 999, hoverLon = 999;
+
 static int menuSel = 0;
-static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge", "Bridge: Hard" };
+static const char* MODE_NAMES[MODE_COUNT] = { "Classic", "Bridge", "Bridge: Hard", "Explore" };
 static const char* MODE_DESC[MODE_COUNT] = {
 	"Find the hidden country by how far each guess is.",
 	"Link two countries through neighbours. No limit.",
 	"Same, but only the shortest length + 4 guesses.",
+	"Practice: browse the world map and look up countries.",
 };
 static GlobeView view;
 static BottomView bottomView = VIEW_KEYBOARD;
@@ -171,6 +185,16 @@ static void refresh_colors(void)
 		markerMask[i] = 0;
 	}
 	if (inMenu) return;
+	if (game.mode == MODE_EXPLORE) {
+		for (int i = 0; i < COUNTRY_COUNT; i++) countryColor[i] = POLITICAL[COUNTRIES[i].shade & 7];
+		if (exploreSel >= 0) {
+			for (int i = 0; i < COUNTRY_COUNT; i++)
+				if (i != exploreSel && country_distance(i, exploreSel) == 0) countryColor[i] = RGBA(255, 232, 165, 255);
+			countryColor[exploreSel] = CLR_ACCENT;
+			markerMask[exploreSel] = 1;
+		}
+		return;
+	}
 	if (is_bridge(game.mode)) {
 		static const u32* routeColor[3] = { &CLR_ON, &CLR_NEAR, &CLR_OFF };
 		if (game.gaveUp)
@@ -229,6 +253,8 @@ static void new_game(GameMode mode)
 	listScroll = 0;
 	confirmGiveUp = false;
 	view.animating = false;
+	exploreSel = exploreHover = -1;
+	hoverLat = 999;
 	if (is_bridge(mode)) {
 		focus_between(game.start, game.end);
 		view.lat = view.tlat; view.lon = view.tlon; view.animating = false;  // jump straight there
@@ -260,8 +286,40 @@ static void finish_game(bool won)
 	stats_save(&stats, game.mode);
 }
 
+static void explore_select(int c)
+{
+	exploreSel = c;
+	game.input[0] = 0;
+	game_update_suggestions(&game);
+	refresh_colors();
+	if (c >= 0) {
+		globe_focus(&view, COUNTRIES[c].lat, COUNTRIES[c].lon);
+		// zoom in on small countries, out for big ones
+		float z = 50.0f / (COUNTRIES[c].extent + 4.0f);
+		view.zoom = z < 1.0f ? 1.0f : (z > 6.0f ? 6.0f : z);
+	}
+}
+
+// comma separated list of a country's land neighbours
+static int neighbours_text(int c, char* out, int size)
+{
+	int len = 0, n = 0;
+	out[0] = 0;
+	for (int i = 0; i < COUNTRY_COUNT && len < size - 1; i++) {
+		if (i == c || country_distance(i, c) != 0) continue;
+		len += snprintf(out + len, size - len, "%s%s", n ? ", " : "", COUNTRIES[i].name);
+		n++;
+	}
+	return n;
+}
+
 static void submit_guess(int c)
 {
+	if (game.mode == MODE_EXPLORE) {
+		if (c < 0) show_toast(game.input[0] ? "No country matches that" : "Type a country name first");
+		else explore_select(c);
+		return;
+	}
 	if (c < 0) {
 		show_toast(game.input[0] ? "No country matches that" : "Type a country name first");
 		return;
@@ -391,6 +449,24 @@ static void draw_top_bridge(float cx)
 	draw_toast(cx);
 }
 
+static void draw_top_explore(float cx, float cy)
+{
+	text(8, 4, 0.55f, CLR_ACCENT, 0, "EXPLORE");
+	text(TOP_W - 8, 4, 0.42f, CLR_DIM, C2D_AlignRight, "Zoom %.1fx", view.zoom);
+	// crosshair
+	u32 ch = RGBA(255, 255, 255, 220);
+	C2D_DrawRectSolid(cx - 9, cy - 0.75f, 0.9f, 6, 1.5f, ch);
+	C2D_DrawRectSolid(cx + 3, cy - 0.75f, 0.9f, 6, 1.5f, ch);
+	C2D_DrawRectSolid(cx - 0.75f, cy - 9, 0.9f, 1.5f, 6, ch);
+	C2D_DrawRectSolid(cx - 0.75f, cy + 3, 0.9f, 1.5f, 6, ch);
+
+	C2D_DrawRectSolid(0, SCR_H - 34, 0.85f, TOP_W, 34, RGBA(0, 0, 0, 150));
+	if (exploreHover >= 0) text_fit(cx, SCR_H - 32, 0.6f, TOP_W - 16, CLR_TEXT, C2D_AlignCenter, COUNTRIES[exploreHover].name);
+	else text(cx, SCR_H - 32, 0.6f, RGBA(120, 160, 220, 255), C2D_AlignCenter, "Ocean");
+	text(cx, SCR_H - 14, 0.4f, CLR_DIM, C2D_AlignCenter, "Circle Pad: move   L/R: zoom   START: menu");
+	draw_toast(cx);
+}
+
 static void draw_top(float time)
 {
 	for (int i = 0; i < 90; i++)
@@ -405,6 +481,7 @@ static void draw_top(float time)
 	int hl = game.guessCount > 0 ? game.guesses[game.guessCount - 1] : -1;
 	if (game.won || game.gaveUp) hl = game.target;
 	if (is_bridge(game.mode) && game.guessCount == 0) hl = game.end;
+	if (game.mode == MODE_EXPLORE) hl = exploreSel;
 	if (inMenu) hl = -1;
 	globe_draw_markers(&view, countryColor, markerMask, hl, time, cx, cy);
 
@@ -415,8 +492,15 @@ static void draw_top(float time)
 		return;
 	}
 
+	// keep the title row readable when zoomed in over land
+	C2D_DrawRectSolid(0, 0, 0.85f, TOP_W, 22, RGBA(0, 0, 0, 120));
+
 	if (is_bridge(game.mode)) {
 		draw_top_bridge(cx);
+		return;
+	}
+	if (game.mode == MODE_EXPLORE) {
+		draw_top_explore(cx, cy);
 		return;
 	}
 
@@ -466,6 +550,55 @@ static void draw_button(float x, float y, float w, float h, u32 bg, u32 fg, floa
 	text(x + w / 2, y + (h - 30 * scale) / 2, scale, fg, C2D_AlignCenter, "%s", label);
 }
 
+// draws a comma separated list over up to maxLines lines, breaking after commas
+static void text_wrapped(float x, float y, float scale, float maxW, int maxLines, u32 color, const char* s)
+{
+	char line[160];
+	int line_no = 0;
+	while (*s && line_no < maxLines) {
+		int fit = 0, i = 0;
+		// grow the line one list item at a time
+		for (;;) {
+			const char* comma = strstr(s + i, ", ");
+			int end = comma ? (int)(comma - s) + 1 : (int)strlen(s);
+			if (end >= (int)sizeof(line)) break;
+			memcpy(line, s, end); line[end] = 0;
+			if (fit && text_width(scale, line) > maxW) break;
+			fit = end;
+			if (!comma) break;
+			i = end + 1;
+		}
+		if (!fit) fit = strlen(s) < sizeof(line) - 1 ? strlen(s) : sizeof(line) - 1;
+		bool last = line_no == maxLines - 1 && s[fit];
+		memcpy(line, s, fit); line[fit] = 0;
+		if (last) strcat(line, " ...");
+		text(x, y + line_no * 15, scale, color, 0, "%s", line);
+		s += fit;
+		while (*s == ' ') s++;
+		line_no++;
+	}
+}
+
+static void draw_explore_info(void)
+{
+	C2D_DrawRectSolid(4, 34, 0.5f, 312, 73, CLR_PANEL);
+	int c = exploreSel >= 0 ? exploreSel : exploreHover;
+	if (c < 0) {
+		text(160, 48, 0.45f, CLR_TEXT, C2D_AlignCenter, "Move the Circle Pad to look around.");
+		text(160, 68, 0.42f, CLR_DIM, C2D_AlignCenter, "Type a country and press Go to fly there.");
+		return;
+	}
+	char buf[1024];
+	C2D_DrawRectSolid(4, 34, 0.55f, 3, 73, c == exploreSel ? CLR_ACCENT : CLR_DIM);
+	text_fit(12, 36, 0.55f, 296, c == exploreSel ? CLR_ACCENT : CLR_TEXT, 0, COUNTRIES[c].name);
+	int n = neighbours_text(c, buf, sizeof(buf));
+	if (n == 0) text(12, 60, 0.42f, CLR_DIM, 0, "No land borders");
+	else {
+		text(12, 58, 0.4f, CLR_DIM, 0, "Borders %d countr%s:", n, n == 1 ? "y" : "ies");
+		text_wrapped(12, 73, 0.4f, 296, 2, CLR_TEXT, buf);
+	}
+}
+
 static void draw_keyboard_view(void)
 {
 	// input box
@@ -478,7 +611,13 @@ static void draw_keyboard_view(void)
 	} else {
 		text(10, 9, 0.5f, CLR_DIM, 0, "Type a country...");
 	}
-	draw_button(254, 4, 62, 26, CLR_KEY, CLR_TEXT, 0.45f, "List (X)");
+	bool explore = game.mode == MODE_EXPLORE;
+	draw_button(254, 4, 62, 26, CLR_KEY, CLR_TEXT, 0.45f, explore ? "Clear (X)" : "List (X)");
+
+	if (explore && !game.input[0]) {
+		draw_explore_info();
+		goto keys;
+	}
 
 	// suggestions
 	for (int i = 0; i < MAX_SUGGEST; i++) {
@@ -494,13 +633,14 @@ static void draw_keyboard_view(void)
 	else if (!game.input[0])
 		text(160, 63, 0.42f, CLR_DIM, C2D_AlignCenter, "Tap a suggestion or press A to guess it");
 
-	// keys
+keys:
 	for (int i = 0; i < keyCount; i++) {
 		Key* k = &keys[i];
 		bool down = i == pressedKey && pressedTimer > 0;
 		u32 bg = down ? CLR_KEY_DOWN : (k->ch == KEY_ENTER ? RGBA(150, 70, 30, 255) : CLR_KEY);
 		char label[8];
-		if (k->label) snprintf(label, sizeof(label), "%s", k->label);
+		if (k->ch == KEY_ENTER && explore) snprintf(label, sizeof(label), "Go");
+		else if (k->label) snprintf(label, sizeof(label), "%s", k->label);
 		else { label[0] = k->ch; label[1] = 0; }
 		draw_button(k->x, k->y, k->w, k->h, bg, CLR_TEXT, k->label ? 0.48f : 0.6f, label);
 	}
@@ -580,14 +720,14 @@ static void draw_result_view(void)
 
 static void draw_menu_view(void)
 {
-	text(160, 10, 0.7f, CLR_TEXT, C2D_AlignCenter, "Choose a game");
+	text(160, 6, 0.62f, CLR_TEXT, C2D_AlignCenter, "Choose a game");
 	for (int i = 0; i < MODE_COUNT; i++) {
-		float y = 40 + i * 58;
+		float y = 34 + i * 44;
 		bool sel = i == menuSel;
-		C2D_DrawRectSolid(16, y, 0.5f, 288, 52, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
-		C2D_DrawRectSolid(16, y, 0.55f, 4, 52, sel ? CLR_ACCENT : CLR_KEY);
-		text(30, y + 4, 0.6f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
-		text_fit(30, y + 30, 0.42f, 266, CLR_DIM, 0, MODE_DESC[i]);
+		C2D_DrawRectSolid(16, y, 0.5f, 288, 40, sel ? RGBA(60, 46, 40, 255) : CLR_PANEL);
+		C2D_DrawRectSolid(16, y, 0.55f, 4, 40, sel ? CLR_ACCENT : CLR_KEY);
+		text(28, y + 2, 0.52f, sel ? CLR_ACCENT : CLR_TEXT, 0, "%s", MODE_NAMES[i]);
+		text_fit(28, y + 22, 0.38f, 270, CLR_DIM, 0, MODE_DESC[i]);
 	}
 	text(160, 214, 0.4f, CLR_DIM, C2D_AlignCenter, "Tap a game or press A    START: quit");
 }
@@ -618,7 +758,7 @@ static void handle_touch(touchPosition t, u32 kDown, u32 kHeld)
 	if (!(kDown & KEY_TOUCH)) return;
 	if (inMenu) {
 		for (int i = 0; i < MODE_COUNT; i++)
-			if (in_rect(t, 16, 40 + i * 58, 288, 52)) { menuSel = i; new_game((GameMode)i); }
+			if (in_rect(t, 16, 34 + i * 44, 288, 40)) { menuSel = i; new_game((GameMode)i); }
 		return;
 	}
 	if (game.won || game.gaveUp) {
@@ -626,7 +766,11 @@ static void handle_touch(touchPosition t, u32 kDown, u32 kHeld)
 		else if (in_rect(t, 165, 162, 135, 40)) bottomView = VIEW_LIST;
 		return;
 	}
-	if (in_rect(t, 254, 4, 62, 26)) { bottomView = VIEW_LIST; return; }
+	if (in_rect(t, 254, 4, 62, 26)) {
+		if (game.mode == MODE_EXPLORE) explore_select(-1);
+		else bottomView = VIEW_LIST;
+		return;
+	}
 	for (int i = 0; i < game.suggestCount; i++)
 		if (in_rect(t, 4, 34 + i * 25, 312, 23)) { submit_guess(game.suggest[i]); return; }
 	for (int i = 0; i < keyCount; i++) {
@@ -677,7 +821,10 @@ int main(int argc, char* argv[])
 		if (kDown & KEY_START) { open_menu(); goto globe_controls; }
 
 		bool over = game.won || game.gaveUp;
-		if (kDown & KEY_X) bottomView = bottomView == VIEW_LIST ? VIEW_KEYBOARD : VIEW_LIST;
+		if (kDown & KEY_X) {
+			if (game.mode == MODE_EXPLORE) explore_select(-1);
+			else bottomView = bottomView == VIEW_LIST ? VIEW_KEYBOARD : VIEW_LIST;
+		}
 		if (over && (kDown & KEY_A)) new_game(game.mode);
 		else if (!over && bottomView == VIEW_KEYBOARD) {
 			if ((kDown & KEY_DUP) && game.suggestSel > 0) game.suggestSel--;
@@ -690,7 +837,7 @@ int main(int argc, char* argv[])
 			if (kDown & KEY_DDOWN) listScroll++;
 			if (kDown & KEY_B) bottomView = VIEW_KEYBOARD;
 		}
-		if ((kDown & KEY_SELECT) && !over) {
+		if ((kDown & KEY_SELECT) && !over && game.mode != MODE_EXPLORE) {
 			if (confirmGiveUp) {
 				game_give_up(&game);
 				finish_game(false);
@@ -724,6 +871,10 @@ int main(int argc, char* argv[])
 		bool spin = inMenu || (game.mode == MODE_CLASSIC && game.guessCount == 0);
 		if (spin && !view.animating && idleTimer > 120) view.lon += 0.12f;
 		globe_view_update(&view);
+		if (!inMenu && game.mode == MODE_EXPLORE && (fabsf(view.lat - hoverLat) > 0.01f || fabsf(view.lon - hoverLon) > 0.01f)) {
+			hoverLat = view.lat; hoverLon = view.lon;
+			exploreHover = globe_country_at(view.lat, view.lon);
+		}
 
 		if (toastTimer > 0) toastTimer--;
 		if (pressedTimer > 0) pressedTimer--;

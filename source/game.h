@@ -6,7 +6,7 @@
 #define MAX_SUGGEST 3
 
 typedef enum { RESULT_NONE, RESULT_NEW, RESULT_REPEAT, RESULT_WIN, RESULT_ENDPOINT, RESULT_LOSE } GuessResult;
-typedef enum { MODE_CLASSIC, MODE_BRIDGE, MODE_BRIDGE_HARD, MODE_COUNT } GameMode;
+typedef enum { MODE_CLASSIC, MODE_BRIDGE, MODE_BRIDGE_HARD, MODE_EXPLORE, MODE_COUNT } GameMode;
 static inline bool is_bridge(GameMode m) { return m == MODE_BRIDGE || m == MODE_BRIDGE_HARD; }
 // Bridge mode: how a guessed country relates to the shortest land routes between the two ends
 typedef enum { ROUTE_ON, ROUTE_NEAR, ROUTE_OFF } RouteStatus;

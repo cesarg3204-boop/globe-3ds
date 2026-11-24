@@ -1,5 +1,5 @@
 wait 10
-touch 160 80
+touch 160 54
 wait 5
 wait 30
 dump 01_start

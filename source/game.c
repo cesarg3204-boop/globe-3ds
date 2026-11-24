@@ -85,6 +85,10 @@ void game_new(Game* g, GameMode mode)
 		g->target = random_target();
 		return;
 	}
+	if (mode == MODE_EXPLORE) {
+		g->target = -1;
+		return;
+	}
 	// Bridge: pick two countries 3..7 border crossings apart (2..6 countries in between)
 	for (;;) {
 		g->start = random_target();
@@ -228,7 +232,7 @@ void game_give_up(Game* g)
 
 #define STATS_DIR "sdmc:/3ds/globe3ds"
 static const char* STATS_FILES[MODE_COUNT] = { STATS_DIR "/stats.txt", STATS_DIR "/stats_bridge.txt",
-                                                  STATS_DIR "/stats_bridge_hard.txt" };
+                                                  STATS_DIR "/stats_bridge_hard.txt", STATS_DIR "/stats_explore.txt" };
 
 void stats_load(Stats* s, GameMode mode)
 {
