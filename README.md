@@ -70,11 +70,11 @@ Your stats (games played, win rate, average guesses, streak) are saved per mode 
 <img src="docs/fbi-qr.png" width="220" alt="QR code for the latest Globe3DS.cia">
 
 1. Open **FBI** on your 3DS and choose **Remote Install → Scan QR Code**.
-2. Point the camera at this QR code and confirm. FBI downloads and installs the latest `Globe3DS.cia`.
+2. Point the camera at this QR code and confirm. FBI downloads and installs `Globe3DS.cia` (v1.0.0).
 3. Globe3DS appears on the HOME Menu with its own globe banner.
 
 The QR code points at
-`https://github.com/cesarg3204-boop/globe-3ds/releases/latest/download/Globe3DS.cia`.
+`https://github.com/cesarg3204-boop/globe-3ds/releases/download/v1.0.0/Globe3DS.cia`.
 
 ### Homebrew Launcher
 
